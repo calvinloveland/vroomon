@@ -3,8 +3,8 @@ from vroomon.ground import Ground
 from vroomon.simulation import Simulation
 
 CAR_DNA = {
-    "frame": ["C", "G", "D", "D", "G"],  # C = Cylinder, G = Gear, D = DriveShaft
-    "powertrain": ["R", "W", "R", "R", "W"],  # R = Rectangle, W = Wheel
+    "powertrain": ["C", "G", "D", "D", "G"],  # C = Cylinder, G = Gear, D = DriveShaft
+    "frame": ["R", "W", "R", "R", "W"],  # R = Rectangle, W = Wheel
 }
 
 

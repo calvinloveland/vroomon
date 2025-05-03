@@ -1,3 +1,4 @@
+import pymunk
 import random
 
 
@@ -15,10 +16,9 @@ class Ground:
 
         self.points = generate_points()
 
-    def add_to_space(self,space):
-        for point in self.points:
-            floor = space.
-            floor.setFriction(0.5)
-            floor.setElasticity(0.5)
-            floor.setMass(0)
-            floor.setColor((0.5, 0.5, 0.5))
+    def add_to_space(self, space):
+        # Create a static ground as a line segment.
+        static_body = space.static_body
+        ground_shape = pymunk.Segment(static_body, (0, 500), (600, 500), 5)
+        ground_shape.friction = 1.0
+        space.add(ground_shape)

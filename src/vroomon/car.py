@@ -36,7 +36,7 @@ class GearSet(PowertrainPart):
         self.output_ratio = output_ratio
 
     @classmethod
-    def from_random(cls,inout_mu,input_sigma,wheel_mu,wheel_sigma,output_mu,output_sigma):
+    def from_random(cls,inout_mu=1,input_sigma=1,wheel_mu=0.5,wheel_sigma=0.1,output_mu=1,output_sigma=1):
         return cls(
             random.normalvariate(inout_mu, input_sigma),
             random.normalvariate(wheel_mu, wheel_sigma),
@@ -48,24 +48,55 @@ class GearSet(PowertrainPart):
 class Car:
 
     def build_from_dna(self, dna):
+        print(dna)
         self.frame = []
         self.powertrain = []
+        x = 0
         for frame_part in dna["frame"]:
-            if frame_part is "PJ":
-                self.frame.append(pymunk.PinJoint())
-            elif frame_part is "GJ":
-                self.frame.append(pymunk.GrooveJoint())
+            if frame_part == "R":
+                body = pymunk.Body()
+                body.position = (10, 5+x)
+                polygon = pymunk.Poly.create_box(body, (5, 10))
+                polygon.density = 1
+                polygon.color = (0, 0, 255, 200)
+                self.frame.append((body, polygon))
+            elif frame_part == "W":
+                body = pymunk.Body(1, 1)
+                body.position = (0, 0)
+                circle = pymunk.Circle(body, 1)
+                circle.mass = 1
+                self.frame.append((body, circle))
+            else:
+                raise ValueError(f"Unknown frame part: {frame_part}")
+            x += 5
         for powertrain_part in dna["powertrain"]:
-            if powertrain_part is "C":
-                self.powertrain.append(Cylinder())
-            elif powertrain_part is "DS":
-                self.powertrain.append(DriveShaft())
-            elif powertrain_part is "G":
-                self.powertrain.append(GearSet())
+            if powertrain_part == "C":
+                self.powertrain.append(Cylinder.from_random())
+            elif powertrain_part == "D":
+                self.powertrain.append(DriveShaft.from_random())
+            elif powertrain_part == "G":
+                self.powertrain.append(GearSet.from_random())
+            else:
+                raise ValueError(f"Unknown powertrain part: {powertrain_part}")
+        if len(self.frame) == 0:
+            raise ValueError("Frame must have at least one part")
+        if len(self.powertrain) == 0:
+            raise ValueError("Powertrain must have at least one part")
+        if len(self.frame) != len(self.powertrain):
+            raise ValueError("Frame and powertrain must have the same number of parts")
 
     def __init__(self, dna=None):
         self.frame = []
         self.powertrain = []
+        if dna is not None:
+            self.build_from_dna(dna)
 
     def add_to_space(self,space):
+        for body, shape in self.frame:
+            space.add(body, shape)
+
+    def get_y_position(self):
+        print(self.frame)
+        return self.frame[0][0].position.y
+
 
