@@ -1,4 +1,4 @@
-from vroomon.car import Car
+from vroomon.car.car import Car
 from vroomon.ground import Ground
 from vroomon.simulation import Simulation
 
