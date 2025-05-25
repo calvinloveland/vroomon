@@ -18,8 +18,12 @@ dependencies = [
 "loguru",
 "pymunk",
 "pygame",
+"lazy_ci @ git+https://github.com/calvinloveland/lazy_ci.git"
 ]
 dynamic = ["version"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [project.scripts]
 "vroomon" = "vroomon.main:main"
