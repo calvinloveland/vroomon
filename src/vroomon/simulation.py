@@ -38,7 +38,7 @@ class Simulation:
                 if not running:
                     break
 
-            for i in range(10):
+            for _ in range(10):
                 self.space.step(0.01)
 
             if visualize:

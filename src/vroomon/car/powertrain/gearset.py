@@ -1,9 +1,11 @@
 import random
+
 from vroomon.car.powertrain import PowertrainPart
 
 
 class GearSet(PowertrainPart):
     def __init__(self, input_ratio, wheel_proportion, output_ratio):
+        """Initialize a gear set with input ratio, wheel proportion, and output ratio."""
         self.input_ratio = max(input_ratio, 0.1)
         self.wheel_proportion = wheel_proportion
         self.output_ratio = max(output_ratio, 0.1)
@@ -18,6 +20,7 @@ class GearSet(PowertrainPart):
         output_mu=1,
         output_sigma=1,
     ):
+        """Create a gear set with random parameters based on normal distribution."""
         return cls(
             random.normalvariate(input_mu, input_sigma),
             random.normalvariate(wheel_mu, wheel_sigma),
@@ -25,6 +28,7 @@ class GearSet(PowertrainPart):
         )
 
     def to_dna(self):
+        """Convert the gear set to DNA format."""
         return {
             "type": "G",
             "input_ratio": self.input_ratio,
@@ -34,4 +38,5 @@ class GearSet(PowertrainPart):
 
     @classmethod
     def from_dna(cls, dna):
+        """Create a gear set from DNA."""
         return cls(dna["input_ratio"], dna["wheel_proportion"], dna["output_ratio"])

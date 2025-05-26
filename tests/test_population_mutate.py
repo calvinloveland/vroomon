@@ -1,7 +1,9 @@
-import pytest
 import random
-from vroomon.population.population import mutate
+
+import pytest
+
 import vroomon.population.population as pop
+from vroomon.population.population import mutate
 
 
 class DummyFramePart:

@@ -1,9 +1,9 @@
-import copy, random
+import copy
+import random
 
+from vroomon.car.car import Car  # added import for Car type checking
 from vroomon.car.frame.all import ALL_FRAME_PARTS
 from vroomon.car.powertrain.all import ALL_POWERTRAIN_PARTS
-from vroomon.car.car import Car  # added import for Car type checking
-
 
 SEQUENCE_LENGTH = 3
 

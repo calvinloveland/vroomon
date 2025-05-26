@@ -1,17 +1,18 @@
 """Car module: defines the Car class with powertrain and frame building for simulation."""
 
-import random
 import copy
+import json
+import random
 from collections import namedtuple
 
 import pymunk
 from loguru import logger
 
+from vroomon.car.frame.rectangle import Rectangle
+from vroomon.car.frame.wheel import Wheel
 from vroomon.car.powertrain.cylinder import Cylinder
 from vroomon.car.powertrain.driveshaft import DriveShaft
 from vroomon.car.powertrain.gearset import GearSet
-from vroomon.car.frame.rectangle import Rectangle
-from vroomon.car.frame.wheel import Wheel
 
 Position = namedtuple("Position", ["x", "y"])
 
@@ -20,6 +21,7 @@ class Car:
     """Represent a car built from DNA with frame and powertrain parts."""
 
     FRAME_OFFSET = 10
+    SEQUENCE_LENGTH = 3
 
     def calculate_wheel_power(self, wheel_position):
         """Compute power and torque delivered to the wheel at given index."""
@@ -58,6 +60,7 @@ class Car:
         # fallback return if no early return triggered
         return current_power, current_torque
 
+    # pylint: disable=too-many-branches,too-many-statements
     def build_from_dna(self, dna):
         """Construct frame and powertrain parts from given DNA dict."""
         logger.debug(f"Car DNA: {dna}")
@@ -68,79 +71,86 @@ class Car:
         self.frame_parts = []  # keep original part instances for DNA serialization
         self.body = pymunk.Body()  # Main body
         self.body.position = (10, 10)
-        x = 0
-        # Determine if DNA parts are dicts or legacy codes
-        new_pt_format = len(dna["powertrain"]) > 0 and isinstance(
-            dna["powertrain"][0], dict
-        )
-        for part_dna in dna["powertrain"]:
-            if new_pt_format:
-                code = part_dna["type"]
-                if code == "C":
-                    self.powertrain.append(Cylinder.from_dna(part_dna))
-                elif code == "D":
-                    self.powertrain.append(DriveShaft.from_dna(part_dna))
-                elif code == "G":
-                    self.powertrain.append(GearSet.from_dna(part_dna))
-                else:
-                    raise ValueError(f"Unknown powertrain part type in DNA: {code}")
-            else:
-                # legacy code string
-                if part_dna == "C":
-                    self.powertrain.append(Cylinder.from_random())
-                elif part_dna == "D":
-                    self.powertrain.append(DriveShaft.from_random())
-                elif part_dna == "G":
-                    self.powertrain.append(GearSet.from_random())
-                else:
-                    raise ValueError(f"Unknown powertrain part: {part_dna}")
-        # Build frame parts
-        new_frame_format = len(dna["frame"]) > 0 and isinstance(dna["frame"][0], dict)
-        for frame_dna in dna["frame"]:
-            pos = Position(x, 0)
-            if new_frame_format:
-                code = frame_dna["type"]
-                if code == "R":
-                    rectangle = Rectangle.from_dna(self.body, pos, frame_dna)
-                    part = rectangle
-                elif code == "W":
-                    part = Wheel.from_dna(self.body, pos, frame_dna)
-                else:
-                    raise ValueError(f"Unknown frame part type in DNA: {code}")
-                # attach part
-                self.frame_parts.append(part)
-                if isinstance(part, Rectangle):
-                    self.frame.append((part.body, part.polygon))
-                else:
-                    # Wheel
-                    self.frame.append((part.wheel_body, part.circle))
-                    self.joints.append(part.pivot)
-                    self.motors.append(part.motor)
-                x += self.FRAME_OFFSET
-            else:
-                # legacy code string
-                if frame_dna == "R":
-                    rectangle = Rectangle(self.body, pos)
-                    self.frame_parts.append(rectangle)
-                    self.frame.append((rectangle.body, rectangle.polygon))
-                    x += self.FRAME_OFFSET
-                elif frame_dna == "W":
-                    wheel_power, wheel_torque = self.calculate_wheel_power(
-                        len(self.frame)
-                    )
-                    wheel = Wheel.from_random(self.body, pos, wheel_power, wheel_torque)
-                    self.frame_parts.append(wheel)
-                    self.frame.append((wheel.wheel_body, wheel.circle))
-                    self.joints.append(wheel.pivot)
-                    self.motors.append(wheel.motor)
-                else:
-                    raise ValueError(f"Unknown frame part: {frame_dna}")
+        # Build powertrain and frame using helper methods
+        self._build_powertrain(dna["powertrain"])
+        self._build_frame(dna["frame"])
         if len(self.frame) == 0:
             raise ValueError("Frame must have at least one part")
         if len(self.powertrain) == 0:
             raise ValueError("Powertrain must have at least one part")
         if len(self.frame) != len(self.powertrain):
             raise ValueError("Frame and powertrain must have the same number of parts")
+
+    def _build_powertrain(self, powertrain_dna):
+        """Helper to build powertrain parts from DNA list"""
+        new_format = bool(powertrain_dna) and isinstance(powertrain_dna[0], dict)
+        for part_dna in powertrain_dna:
+            part = self._create_powertrain_part(part_dna, new_format)
+            self.powertrain.append(part)
+
+    def _create_powertrain_part(self, part_dna, new_format):
+        """Instantiate a single powertrain part based on DNA or code"""
+        if new_format:
+            mapping = {
+                "C": Cylinder.from_dna,
+                "D": DriveShaft.from_dna,
+                "G": GearSet.from_dna,
+            }
+            try:
+                return mapping[part_dna["type"]](part_dna)
+            except KeyError:
+                raise ValueError(
+                    f"Unknown powertrain part type in DNA: {part_dna['type']}"
+                )
+        mapping = {
+            "C": Cylinder.from_random,
+            "D": DriveShaft.from_random,
+            "G": GearSet.from_random,
+        }
+        try:
+            return mapping[part_dna]()
+        except KeyError:
+            raise ValueError(f"Unknown powertrain part: {part_dna}")
+
+    def _build_frame(self, frame_dna_list):
+        """Helper to build frame parts from DNA list"""
+        new_format = bool(frame_dna_list) and isinstance(frame_dna_list[0], dict)
+        x = 0
+        for frame_dna in frame_dna_list:
+            pos = Position(x, 0)
+            if new_format:
+                part = self._create_frame_part_from_dna(self.body, pos, frame_dna)
+            else:
+                part = self._create_frame_part_random(self.body, pos, frame_dna)
+            self.frame_parts.append(part)
+            if isinstance(part, Rectangle):
+                self.frame.append((part.body, part.polygon))
+            else:
+                self.frame.append((part.wheel_body, part.circle))
+                self.joints.append(part.pivot)
+                self.motors.append(part.motor)
+            x += self.FRAME_OFFSET
+
+    def _create_frame_part_from_dna(self, body, pos, frame_dna):
+        """Instantiate a frame part from DNA dict"""
+        mapping = {
+            "R": lambda bd, ps, fd: Rectangle.from_dna(bd, ps, fd),
+            "W": lambda bd, ps, fd: Wheel.from_dna(bd, ps, fd),
+        }
+        try:
+            return mapping[frame_dna["type"]](body, pos, frame_dna)
+        except KeyError:
+            raise ValueError(f"Unknown frame part type in DNA: {frame_dna['type']}")
+
+    def _create_frame_part_random(self, body, pos, frame_dna):
+        """Instantiate a legacy frame part by code"""
+        if frame_dna == "R":
+            return Rectangle(body, pos)
+        if frame_dna == "W":
+            idx = len(self.frame)
+            power, torque = self.calculate_wheel_power(idx)
+            return Wheel.from_random(body, pos, power, torque)
+        raise ValueError(f"Unknown frame part: {frame_dna}")
 
     def __init__(self, dna=None):
         """Initialize a Car, optionally building from DNA."""
@@ -152,7 +162,7 @@ class Car:
     def add_to_space(self, space):
         """Add the car bodies, shapes, joints, and motors to the physics space."""
         for body, shape in self.frame:
-            if body not in space._bodies:
+            if body not in space._bodies:  # pylint: disable=protected-access
                 space.add(body)
             space.add(shape)
         for joint in self.joints:
@@ -174,16 +184,12 @@ class Car:
 
     def save_dna(self, filepath):
         """Save the car DNA to a JSON file with UTF-8 encoding."""
-        import json
-
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(self.to_dna(), f, indent=2)
 
     @classmethod
     def load_from_json(cls, filepath):
         """Load car DNA from a UTF-8 encoded JSON file and return a new Car."""
-        import json
-
         with open(filepath, encoding="utf-8") as f:
             dna = json.load(f)
         return cls(dna)
@@ -223,14 +229,13 @@ class Car:
         mother = random.choice([car1, car2])
         other = car1 if mother == car2 else car2
         child = copy.deepcopy(mother)
-        SEQ = 3
         for idx in range(len(child.frame)):
             if random.random() < 0.5:
-                for j in range(SEQ):
+                for j in range(Car.SEQUENCE_LENGTH):
                     if idx + j < len(child.frame):
                         child.frame[idx + j] = other.frame[idx + j]
             if random.random() < 0.5:
-                for j in range(SEQ):
+                for j in range(Car.SEQUENCE_LENGTH):
                     if idx + j < len(child.powertrain):
                         child.powertrain[idx + j] = other.powertrain[idx + j]
         return child.mutate()
