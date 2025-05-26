@@ -34,12 +34,18 @@ class Wheel:
     @classmethod
     def from_random(cls, car_body, pos, power, torque):
         """Create a wheel with a random size."""
-        size = random.normalvariate(10, 5)
+        # Ensure wheel size is always positive to prevent NaN physics
+        size = abs(random.normalvariate(10, 5))
+        # Add minimum size constraint to prevent extremely small wheels
+        size = max(size, 1.0)
         return cls(car_body, pos, power, torque, size)
 
     def mutate(self):
         """Mutate the wheel by changing its size and power."""
-        self.size = random.normalvariate(10, 5)
+        # Ensure wheel size is always positive to prevent NaN physics
+        self.size = abs(random.normalvariate(10, 5))
+        # Add minimum size constraint to prevent extremely small wheels
+        self.size = max(self.size, 1.0)
         self.build_wheel()
 
     def build_wheel(self):
@@ -53,6 +59,16 @@ class Wheel:
         circle.filter = pymunk.ShapeFilter(group=1)
         circle.friction = 0.5
 
+        # Fix NaN physics: Ensure wheel body has valid mass and moment
+        # Calculate mass based on circle area and density
+        area = 3.14159 * self.size * self.size  # π * r²
+        mass = area * circle.density
+        moment = pymunk.moment_for_circle(mass, 0, self.size)
+
+        # Set the body's mass and moment to prevent NaN physics
+        wheel_body.mass = mass
+        wheel_body.moment = moment
+
         pivot = pymunk.PivotJoint(
             self.body, wheel_body, (self.pos.x, self.pos.y), (0, 0)
         )
@@ -60,11 +76,22 @@ class Wheel:
 
         rate = -self.power / self.size
         logger.debug(f"Rate: {rate}")
+
+        # Fix NaN physics issue: ensure minimal torque for zero/low power wheels
         if self.torque <= 0:
             self.torque = 0.01
 
-        motor = pymunk.SimpleMotor(self.body, wheel_body, rate)
-        motor.max_force = self.torque
+        # Prevent NaN values by handling zero-power wheels specially
+        # The root cause is motors with rate=0 but max_force>0 create unstable physics
+        if abs(self.power) < 0.001:  # Essentially zero power
+            # For zero-power wheels, don't create a motor at all to prevent NaN physics
+            logger.debug(f"Zero-power wheel detected, disabling motor to prevent NaN physics")
+            motor = pymunk.SimpleMotor(self.body, wheel_body, 0.0)
+            motor.max_force = 0.0  # No force applied
+        else:
+            # Normal powered wheel
+            motor = pymunk.SimpleMotor(self.body, wheel_body, rate)
+            motor.max_force = self.torque
 
         # collapse into one field
         self.physics = _WheelPhysics(wheel_body, circle, pivot, motor)

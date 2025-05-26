@@ -4,6 +4,7 @@
 import pygame
 import pymunk
 import pymunk.pygame_util
+from loguru import logger
 
 
 class Simulation:
@@ -19,6 +20,10 @@ class Simulation:
         # handle empty car DNA: no parts
         if not car.frame or not car.powertrain:
             return 0
+
+        # Reset car physics state before adding to new space
+        car.reset_physics()
+
         if visualize:
             pygame.init()
             screen = pygame.display.set_mode((600, 600))
@@ -46,8 +51,23 @@ class Simulation:
                 self.space.debug_draw(draw_options)
                 pygame.display.flip()
                 clock.tick(60)
+
         # Calculate score based on car's position and velocity
         score = car.get_y_position()  # Y position
+
+        # Remove car from space when done to prevent conflicts
+        try:
+            for body, shape in car.frame:
+                if body in self.space.bodies:
+                    self.space.remove(body, shape)
+            for joint in car.joints:
+                if joint in self.space.constraints:
+                    self.space.remove(joint)
+            for motor in car.motors:
+                if motor in self.space.constraints:
+                    self.space.remove(motor)
+        except Exception as e:
+            logger.debug(f"Error removing car from space: {e}")
 
         return score
 
@@ -58,6 +78,11 @@ class Simulation:
         # Reset space for this batch simulation
         self.space = pymunk.Space()
         self.space.gravity = (0, 9.8)
+        
+        # Reset physics state for all cars before adding to space
+        for car in cars:
+            car.reset_physics()
+            
         if visualize:
             pygame.init()
             screen = pygame.display.set_mode((600, 600))

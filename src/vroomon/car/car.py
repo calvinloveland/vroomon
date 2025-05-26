@@ -71,9 +71,17 @@ class Car:
         self.frame_parts = []  # keep original part instances for DNA serialization
         self.body = pymunk.Body()  # Main body
         self.body.position = (10, 10)
+        
         # Build powertrain and frame using helper methods
         self._build_powertrain(dna["powertrain"])
         self._build_frame(dna["frame"])
+        
+        # Fix NaN physics: Ensure main body always has valid mass and moment
+        # This prevents NaN when the main body has no shapes (wheel-only cars)
+        if self.body.mass == 0:
+            self.body.mass = 10.0  # Reasonable default mass
+            self.body.moment = 100.0  # Reasonable default moment
+        
         if len(self.frame) == 0:
             raise ValueError("Frame must have at least one part")
         if len(self.powertrain) == 0:
@@ -124,7 +132,8 @@ class Car:
                 part = self._create_frame_part_random(self.body, pos, frame_dna)
             self.frame_parts.append(part)
             if isinstance(part, Rectangle):
-                self.frame.append((part.body, part.polygon))
+                # For rectangles, use the main car body, not part.body
+                self.frame.append((self.body, part.polygon))
             else:
                 self.frame.append((part.wheel_body, part.circle))
                 self.joints.append(part.pivot)
@@ -174,6 +183,57 @@ class Car:
         """Return the vertical position of the front frame part."""
         logger.debug(f"Frame state: {self.frame}")
         return self.frame[0][0].position.y
+
+    def reset_physics(self):
+        """Reset all physics bodies to allow reuse in new spaces."""
+        # The issue is that pymunk shapes can't be reused across spaces
+        # We need to rebuild the entire frame with fresh physics components
+        self._rebuild_frame_physics()
+
+    def _rebuild_frame_physics(self):
+        """Rebuild all frame physics components with fresh pymunk objects."""
+        # Store the original frame parts for DNA serialization
+        original_frame_parts = self.frame_parts.copy()
+
+        # Clear existing physics components
+        self.frame = []
+        self.joints = []
+        self.motors = []
+
+        # Create a fresh main body
+        self.body = pymunk.Body()
+        self.body.position = (10, 10)
+
+        # Rebuild frame with fresh physics components
+        x = 0
+        for part in original_frame_parts:
+            pos = type('Position', (), {'x': x, 'y': 0})()
+
+            if isinstance(part, Rectangle):
+                # Create fresh rectangle with new body
+                fresh_rect = Rectangle(self.body, pos)
+                # Copy any properties we want to preserve
+                fresh_rect.polygon.color = part.polygon.color
+                # Update the original part's polygon reference
+                part.polygon = fresh_rect.polygon
+                self.frame.append((self.body, fresh_rect.polygon))
+
+            elif isinstance(part, Wheel):
+                # Create fresh wheel with new physics components
+                fresh_wheel = Wheel(self.body, pos, part.power, part.torque, part.size)
+                # Update the original part's physics references
+                part.physics = fresh_wheel.physics
+                self.frame.append((fresh_wheel.wheel_body, fresh_wheel.circle))
+                self.joints.append(fresh_wheel.pivot)
+                self.motors.append(fresh_wheel.motor)
+
+            x += self.FRAME_OFFSET
+
+        # Fix NaN physics: Ensure main body always has valid mass and moment after rebuild
+        # This prevents NaN when the main body has no shapes (wheel-only cars)
+        if self.body.mass == 0:
+            self.body.mass = 10.0  # Reasonable default mass
+            self.body.moment = 100.0  # Reasonable default moment
 
     def to_dna(self):
         """Serialize the car's parts to a DNA dictionary."""
@@ -232,10 +292,10 @@ class Car:
         for idx in range(len(child.frame)):
             if random.random() < 0.5:
                 for j in range(Car.SEQUENCE_LENGTH):
-                    if idx + j < len(child.frame):
+                    if idx + j < len(child.frame) and idx + j < len(other.frame):
                         child.frame[idx + j] = other.frame[idx + j]
             if random.random() < 0.5:
                 for j in range(Car.SEQUENCE_LENGTH):
-                    if idx + j < len(child.powertrain):
+                    if idx + j < len(child.powertrain) and idx + j < len(other.powertrain):
                         child.powertrain[idx + j] = other.powertrain[idx + j]
         return child.mutate()

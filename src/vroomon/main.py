@@ -35,9 +35,10 @@ def main():
     # initialize population
     pop = initialize_population(population_size, dna_length)
     ground = Ground()
-    sim = Simulation()
     # evolve over generations
     for gen in range(generations):
+        # Create fresh simulation for each generation to avoid state conflicts
+        sim = Simulation()
         pop = evolve_population(
             pop, retain_ratio=0.5, mutation_rate=0.1, ground=ground, simulation=sim
         )
@@ -46,7 +47,8 @@ def main():
         logger.info(f"Generation {gen+1}/{generations}, Best score: {best_score}")
     # run simulation with visualization for the best car
     logger.info(f"Best car DNA: {best_car}")
-    final_score = sim.score_car(best_car, ground, visualize=True)
+    final_sim = Simulation()  # Fresh simulation for final visualization
+    final_score = final_sim.score_car(best_car, ground, visualize=True)
     logger.info(f"Final best score: {final_score}")
 
 
