@@ -12,24 +12,24 @@ class TestZeroPowerWheelBug(unittest.TestCase):
 
     def test_zero_power_wheel_nan_bug_demonstration(self):
         """
-        Demonstrate the exact bug: wheels with zero power but non-zero torque
-        cause NaN values in the physics simulation.
+        Verify that the zero-power wheel NaN bug has been fixed.
         
-        This test documents the current bug and will fail until fixed.
+        Previously, wheels with zero power but non-zero torque would cause NaN physics.
+        After the fix, these configurations should work safely.
         """
-        print("=== Zero Power Wheel NaN Bug Demonstration ===")
+        print("=== Zero Power Wheel NaN Bug - Verification of Fix ===")
         
-        # The problematic configurations:
+        # The previously problematic configurations:
         problematic_cars = [
             {"frame": ["W"], "powertrain": ["D"]},  # DriveShaft only = 0 power
             {"frame": ["W"], "powertrain": ["G"]},  # GearSet only = 0 power  
         ]
         
         for i, dna in enumerate(problematic_cars):
-            print(f"\nTesting problematic car {i}: {dna}")
+            print(f"\nTesting previously problematic car {i}: {dna}")
             car = Car(dna)
             
-            # Show the problematic configuration
+            # Show the configuration after our fix
             wheel = car.frame_parts[0]
             power, torque = car.calculate_wheel_power(0)
             
@@ -39,26 +39,33 @@ class TestZeroPowerWheelBug(unittest.TestCase):
             print(f"Motor rate: {wheel.motor.rate}")
             print(f"Motor max_force: {wheel.motor.max_force}")
             
-            # This is the bug: power=0 but torque>0, creating motor rate=0 but force>0
+            # Verify the fix: zero-power wheels should have motor force set to 0
             self.assertEqual(wheel.power, 0.0, "Wheel should have zero power")
             self.assertGreater(wheel.torque, 0, "Wheel should have non-zero torque")
             self.assertEqual(wheel.motor.rate, 0.0, "Motor rate should be zero")
-            self.assertGreater(wheel.motor.max_force, 0, "Motor force should be non-zero")
+            self.assertEqual(wheel.motor.max_force, 0.0, "Motor force should now be zero (fix applied)")
             
-            # This configuration causes NaN in simulation
+            # After the fix, this should work without NaN
             simulation = Simulation()
             ground = Ground()
             
-            with self.assertRaises(AssertionError, msg="This should fail due to NaN values"):
+            try:
                 score = simulation.score_car(car, ground, visualize=False)
+                print(f"✅ Fixed! Car {i} simulation succeeded with score: {score}")
                 
-                # Check for NaN in the car after simulation
+                # Verify no NaN values after simulation
                 for body, shape in car.frame:
                     vel = body.velocity
-                    if math.isnan(vel.x) or math.isnan(vel.y):
-                        raise AssertionError(f"NaN found in body velocity: {vel}")
+                    pos = body.position
+                    self.assertFalse(math.isnan(vel.x), f"Car {i} should not have NaN velocity.x: {vel}")
+                    self.assertFalse(math.isnan(vel.y), f"Car {i} should not have NaN velocity.y: {vel}")
+                    self.assertFalse(math.isnan(pos.x), f"Car {i} should not have NaN position.x: {pos}")
+                    self.assertFalse(math.isnan(pos.y), f"Car {i} should not have NaN position.y: {pos}")
                 
-                print(f"Unexpectedly succeeded with score: {score}")
+                self.assertFalse(math.isnan(score), f"Car {i} score should not be NaN: {score}")
+                
+            except Exception as e:
+                self.fail(f"Car {i} should work after fix, but failed: {e}")
 
     def test_working_wheel_configurations(self):
         """Test wheel configurations that should work without NaN errors."""
@@ -66,15 +73,15 @@ class TestZeroPowerWheelBug(unittest.TestCase):
         
         working_cars = [
             {"frame": ["W"], "powertrain": ["C"]},  # Cylinder = has power
-            {"frame": ["W"], "powertrain": ["C", "D"]},  # Cylinder + DriveShaft = has power
-            {"frame": ["W"], "powertrain": ["C", "G"]},  # Cylinder + GearSet = has power
+            {"frame": ["W", "R"], "powertrain": ["C", "D"]},  # Cylinder + DriveShaft = has power (fixed lengths)
+            {"frame": ["W", "R"], "powertrain": ["C", "G"]},  # Cylinder + GearSet = has power (fixed lengths)
         ]
         
         for i, dna in enumerate(working_cars):
             print(f"\nTesting working car {i}: {dna}")
             car = Car(dna)
             
-            wheel = car.frame_parts[0]
+            wheel = car.frame_parts[0]  # First part should be a wheel
             power, torque = car.calculate_wheel_power(0)
             
             print(f"Power calculation result: power={power}, torque={torque}")

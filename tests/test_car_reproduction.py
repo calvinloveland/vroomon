@@ -275,7 +275,7 @@ class TestCarReproduction(unittest.TestCase):
                     print(f"      child.powertrain[{target_idx}] doesn't exist - skip")
 
     def test_reproduce_index_error_bug_documentation(self):
-        """Document the current IndexError bug that occurs with different length cars."""
+        """Verify that the IndexError bug in reproduction has been fixed."""
         import random
         
         # Create cars with different lengths
@@ -291,15 +291,21 @@ class TestCarReproduction(unittest.TestCase):
         }
         long_car = Car(long_car_dna)
         
-        # Use seed 1 which we know triggers the bug
+        # Use seed 1 which previously triggered the bug
         random.seed(1)
         
-        # This should trigger the IndexError
-        with self.assertRaises(IndexError) as context:
-            Car.reproduce(long_car, short_car)
-        
-        self.assertIn("list index out of range", str(context.exception))
-        print(f"Confirmed IndexError bug: {context.exception}")
+        # This should now work without IndexError due to bounds checking in reproduce method
+        try:
+            child = Car.reproduce(long_car, short_car)
+            self.assertIsNotNone(child)
+            self.assertGreater(len(child.frame), 0)
+            self.assertEqual(len(child.frame), len(child.powertrain))
+            print(f"Reproduction succeeded: child has {len(child.frame)} frame parts")
+            print("✅ IndexError bug has been fixed!")
+        except IndexError as e:
+            self.fail(f"IndexError should not occur - bug should be fixed: {e}")
+        except Exception as e:
+            self.fail(f"Unexpected error during reproduction: {e}")
 
     def test_reproduce_after_fix_should_work(self):
         """Test that will pass once the reproduce method is fixed."""

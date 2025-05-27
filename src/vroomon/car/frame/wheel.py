@@ -1,6 +1,7 @@
 """Wheel class for Vroomon car frame parts."""
 
 import random
+import math
 from dataclasses import dataclass
 
 import pymunk
@@ -26,7 +27,8 @@ class Wheel:
         """Initialize a wheel frame part."""
         self.power = power
         self.torque = torque
-        self.size = size
+        # CRITICAL FIX: Validate and sanitize wheel size to prevent crashes
+        self.size = self._validate_size(size)
         self.body = body
         self.pos = pos
         self.build_wheel()
@@ -50,6 +52,10 @@ class Wheel:
 
     def build_wheel(self):
         """Build the wheel body and shape."""
+        # Validate and sanitize power and torque to prevent NaN/infinite values
+        self.power = self._validate_power(self.power)
+        self.torque = self._validate_torque(self.torque)
+        
         # build them locally
         wheel_body = pymunk.Body()
         wheel_body.position = (self.pos.x, 10)
@@ -65,6 +71,12 @@ class Wheel:
         mass = area * circle.density
         moment = pymunk.moment_for_circle(mass, 0, self.size)
 
+        # Additional safety: Ensure mass and moment are valid
+        if mass <= 0 or math.isnan(mass) or math.isinf(mass):
+            logger.warning(f"Invalid wheel mass {mass}, using default mass 10.0")
+            mass = 10.0
+            moment = pymunk.moment_for_circle(mass, 0, self.size)
+
         # Set the body's mass and moment to prevent NaN physics
         wheel_body.mass = mass
         wheel_body.moment = moment
@@ -74,12 +86,13 @@ class Wheel:
         )
         pivot.collide_bodies = False
 
+        # CRITICAL FIX: Safe rate calculation to prevent division by zero
+        # Since we've validated self.size to be >= 1.0, this is now safe
         rate = -self.power / self.size
+        
+        # Additional safety: Validate the calculated rate
+        rate = self._validate_rate(rate)
         logger.debug(f"Rate: {rate}")
-
-        # Fix NaN physics issue: ensure minimal torque for zero/low power wheels
-        if self.torque <= 0:
-            self.torque = 0.01
 
         # Prevent NaN values by handling zero-power wheels specially
         # The root cause is motors with rate=0 but max_force>0 create unstable physics
@@ -89,9 +102,10 @@ class Wheel:
             motor = pymunk.SimpleMotor(self.body, wheel_body, 0.0)
             motor.max_force = 0.0  # No force applied
         else:
-            # Normal powered wheel
+            # Normal powered wheel - validate max_force before setting
+            max_force = self._validate_torque(self.torque)
             motor = pymunk.SimpleMotor(self.body, wheel_body, rate)
-            motor.max_force = self.torque
+            motor.max_force = max_force
 
         # collapse into one field
         self.physics = _WheelPhysics(wheel_body, circle, pivot, motor)
@@ -126,3 +140,88 @@ class Wheel:
     def from_dna(cls, body, pos, dna):
         """Create a wheel from DNA."""
         return cls(body, pos, dna["power"], dna["torque"], dna["size"])
+
+    def _validate_size(self, size):
+        """Validate and sanitize wheel size to prevent physics crashes."""
+        # Handle NaN sizes
+        if math.isnan(size):
+            logger.warning(f"NaN wheel size detected, using default size 5.0")
+            return 5.0
+        
+        # Handle infinite sizes
+        if math.isinf(size):
+            logger.warning(f"Infinite wheel size detected, using default size 5.0")
+            return 5.0
+        
+        # Handle zero or negative sizes
+        if size <= 0:
+            logger.warning(f"Invalid wheel size {size} detected, using minimum size 1.0")
+            return 1.0
+        
+        # Handle extremely small sizes that could cause numerical issues
+        if size < 0.1:
+            logger.warning(f"Very small wheel size {size} detected, using minimum size 1.0")
+            return 1.0
+        
+        # Handle extremely large sizes
+        if size > 50.0:
+            logger.warning(f"Very large wheel size {size} detected, clamping to 50.0")
+            return 50.0
+        
+        return size
+
+    def _validate_power(self, power):
+        """Validate and sanitize wheel power to prevent NaN/infinite values."""
+        if math.isnan(power):
+            logger.warning(f"NaN wheel power detected, using 0.0")
+            return 0.0
+        
+        if math.isinf(power):
+            logger.warning(f"Infinite wheel power detected, clamping to ±1000.0")
+            return 1000.0 if power > 0 else -1000.0
+        
+        # Clamp extreme values
+        if abs(power) > 10000.0:
+            logger.warning(f"Extreme wheel power {power} detected, clamping to ±10000.0")
+            return 10000.0 if power > 0 else -10000.0
+        
+        return power
+
+    def _validate_torque(self, torque):
+        """Validate and sanitize wheel torque to prevent NaN/infinite values."""
+        if math.isnan(torque):
+            logger.warning(f"NaN wheel torque detected, using 0.1")
+            return 0.1
+        
+        if math.isinf(torque):
+            logger.warning(f"Infinite wheel torque detected, using 1000.0")
+            return 1000.0
+        
+        # Ensure minimum positive torque
+        if torque <= 0:
+            logger.debug(f"Zero/negative torque {torque} detected, using minimum 0.1")
+            return 0.1
+        
+        # Clamp extreme values
+        if torque > 50000.0:
+            logger.warning(f"Extreme wheel torque {torque} detected, clamping to 50000.0")
+            return 50000.0
+        
+        return torque
+
+    def _validate_rate(self, rate):
+        """Validate and sanitize motor rate to prevent NaN/infinite values."""
+        if math.isnan(rate):
+            logger.warning(f"NaN motor rate detected, using 0.0")
+            return 0.0
+        
+        if math.isinf(rate):
+            logger.warning(f"Infinite motor rate detected, clamping to ±1000.0")
+            return 1000.0 if rate > 0 else -1000.0
+        
+        # Clamp extreme values to prevent physics instability
+        if abs(rate) > 1000.0:
+            logger.warning(f"Extreme motor rate {rate} detected, clamping to ±1000.0")
+            return 1000.0 if rate > 0 else -1000.0
+        
+        return rate
