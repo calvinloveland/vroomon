@@ -26,7 +26,7 @@ def test_car():
     assert score > 0, "Car should have a positive score on the ground"
 
 
-def main():
+def main(visualize_generations=False):
     """Run the evolutionary simulation and display best car results."""
     # Evolutionary run: maintain a population, score and reproduce
     population_size = 20
@@ -45,12 +45,23 @@ def main():
         scored = score_population(pop, ground, sim)
         best_car, best_score = max(scored, key=lambda x: x[1])
         logger.info(f"Generation {gen+1}/{generations}, Best score: {best_score}")
-    # run simulation with visualization for the best car
+
+        # Visualize the best car from this generation if requested
+        if visualize_generations:
+            logger.info(f"Visualizing best car from generation {gen+1}")
+            gen_sim = Simulation()  # Fresh simulation for generation visualization
+            gen_score = gen_sim.score_car(best_car, ground, visualize=True)
+            logger.info(f"Generation {gen+1} best car score: {gen_score}")
+
+    # run simulation with visualization for the final best car
     logger.info(f"Best car DNA: {best_car}")
     final_sim = Simulation()  # Fresh simulation for final visualization
     final_score = final_sim.score_car(best_car, ground, visualize=True)
     logger.info(f"Final best score: {final_score}")
 
 
+# Example: how to enable generation visualization
 if __name__ == "__main__":
-    main()
+    # Set this to True to watch each generation evolve
+    visualize_each_generation = True  # Changed from False to True
+    main(visualize_generations=visualize_each_generation)

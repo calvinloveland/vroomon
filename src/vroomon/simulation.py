@@ -23,19 +23,28 @@ class Simulation:
 
         # Reset car physics state before adding to new space
         car.reset_physics()
+        logger.debug('Resetting car physics state before simulation')
 
         if visualize:
+            DISPLAY_WIDTH_HEIGHT = (600, 600)
+            logger.debug('Initializing pygame for visualization')
             pygame.init()
-            screen = pygame.display.set_mode((600, 600))
+            screen = pygame.display.set_mode((DISPLAY_WIDTH_HEIGHT))
+            pygame.display.set_caption("Car Simulation")
             clock = pygame.time.Clock()
             draw_options = pymunk.pygame_util.DrawOptions(screen)
+            
         # Add the car and ground to the simulation
         car.add_to_space(self.space)
         ground.add_to_space(self.space)
 
         # Run the simulation for a few steps
         running = True
-        for _ in range(10000):
+        sim_length = 60 # seconds
+        fps = 60
+        steps = sim_length * fps  # Total steps based on simulation length and FPS
+        dt = 1 / fps  # Time step for each frame
+        for step in range(steps):
             if visualize:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
@@ -43,17 +52,37 @@ class Simulation:
                 if not running:
                     break
 
-            for _ in range(10):
-                self.space.step(0.01)
 
+            self.space.step(dt)
             if visualize:
-                screen.fill((255, 255, 255))
-                self.space.debug_draw(draw_options)
-                pygame.display.flip()
-                clock.tick(60)
+                # Check for NaN coordinates before attempting to draw
+                nan_detected = False
+                for body in self.space.bodies:
+                    pos = body.position
+                    if hasattr(pos, 'x') and hasattr(pos, 'y'):
+                        import math
+                        if math.isnan(pos.x) or math.isnan(pos.y):
+                            logger.warning(f"NaN coordinates detected at step {step}, skipping visualization")
+                            nan_detected = True
+                            break
+                
+                if not nan_detected:
+                    try:
+                        screen.fill((255, 255, 255))
+                        self.space.debug_draw(draw_options)
+                        pygame.display.flip()
+                        clock.tick(fps)
+                    except (TypeError, ValueError) as e:
+                        logger.warning(f"Drawing error at step {step}: {e}")
+                        # Continue simulation without visualization
+                        visualize = False
 
         # Calculate score based on car's position and velocity
         score = car.get_y_position()  # Y position
+
+        # Clean up pygame if we were visualizing
+        if visualize:
+            pygame.quit()
 
         # Remove car from space when done to prevent conflicts
         try:
@@ -86,8 +115,10 @@ class Simulation:
         if visualize:
             pygame.init()
             screen = pygame.display.set_mode((600, 600))
+            pygame.display.set_caption("Population Simulation")
             clock = pygame.time.Clock()
             draw_options = pymunk.pygame_util.DrawOptions(screen)
+            
         # Add ground first
         ground.add_to_space(self.space)
         # Add all cars
@@ -95,7 +126,7 @@ class Simulation:
             car.add_to_space(self.space)
         running = True
         # Run simulation steps
-        for _ in range(10000):
+        for step in range(10000):
             if visualize:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
@@ -105,9 +136,34 @@ class Simulation:
             for _ in range(10):
                 self.space.step(0.01)
             if visualize:
-                screen.fill((255, 255, 255))
-                self.space.debug_draw(draw_options)
-                pygame.display.flip()
-                clock.tick(60)
+                # Check for NaN coordinates before attempting to draw
+                nan_detected = False
+                for body in self.space.bodies:
+                    pos = body.position
+                    if hasattr(pos, 'x') and hasattr(pos, 'y'):
+                        import math
+                        if math.isnan(pos.x) or math.isnan(pos.y):
+                            logger.warning(f"NaN coordinates detected at step {step}, disabling visualization")
+                            nan_detected = True
+                            break
+                
+                if not nan_detected:
+                    try:
+                        screen.fill((255, 255, 255))
+                        self.space.debug_draw(draw_options)
+                        pygame.display.flip()
+                        clock.tick(60)
+                    except (TypeError, ValueError) as e:
+                        logger.warning(f"Drawing error at step {step}: {e}")
+                        # Continue simulation without visualization
+                        visualize = False
+                else:
+                    # Continue simulation without visualization if NaN detected
+                    visualize = False
+        
+        # Clean up pygame if we were visualizing
+        if visualize:
+            pygame.quit()
+            
         # Collect scores: vertical position of each car
         return [(car, car.get_y_position()) for car in cars]
