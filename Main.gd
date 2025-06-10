@@ -5,6 +5,7 @@ extends Control
 
 @onready var population_manager: Node2D
 @onready var start_button: Button
+@onready var back_button: Button
 @onready var generation_label: Label
 @onready var best_score_label: Label
 @onready var status_label: Label
@@ -105,7 +106,17 @@ func setup_ui():
 	spacer1.custom_minimum_size.y = 10
 	overlay_panel.add_child(spacer1)
 	
-	# Start button
+	# Button container
+	var button_container = HBoxContainer.new()
+	overlay_panel.add_child(button_container)
+	
+	# Back button
+	back_button = Button.new()
+	back_button.text = "🏠 Menu"
+	back_button.custom_minimum_size = Vector2(80, 35)
+	back_button.pressed.connect(_on_back_pressed)
+	button_container.add_child(back_button)
+	
 	start_button = Button.new()
 	start_button.text = "Start Evolution"
 	start_button.custom_minimum_size = Vector2(180, 35)
@@ -166,9 +177,7 @@ func setup_camera():
 	add_child(camera)
 
 func setup_population_manager():
-	var population_script = load("res://population.gd")
-	population_manager = Node2D.new()
-	population_manager.set_script(population_script)
+	population_manager = PopulationManager.new()
 	add_child(population_manager)
 	
 	# Connect signals
@@ -236,6 +245,44 @@ func _on_start_button_pressed():
 	
 	# Start the evolution process
 	population_manager.start_evolution()
+
+func _on_back_pressed():
+	if is_evolution_running:
+		# Ask for confirmation to stop the evolution
+		var dialog = ConfirmationDialog.new()
+		dialog.dialog_text = "Are you sure you want to go back? The evolution will be stopped."
+		dialog.popup_centered()
+		dialog.confirmed.connect(_on_back_confirmed)
+		add_child(dialog)
+	else:
+		# No evolution in progress, just go back
+		_go_to_menu()
+
+func _on_back_confirmed():
+	# Stop the evolution
+	is_evolution_running = false
+	if population_manager:
+		population_manager.stop_evolution()
+	
+	# Go back to the menu
+	_go_to_menu()
+
+func _go_to_menu():
+	# Here you would typically change to the main menu scene
+	# For now, we just print a message and reset the UI
+	print("Going back to menu...")
+	
+	# Reset UI elements
+	generation_label.text = "Generation: Not started"
+	best_score_label.text = "Best Score: --"
+	progress_bar.value = 0
+	status_label.text = "Ready to start"
+	status_label.modulate = Color.LIGHT_GRAY
+	
+	# Enable buttons
+	start_button.disabled = false
+	start_button.text = "Start Evolution"
+	settings_panel.modulate = Color.WHITE
 
 func _on_population_size_changed(value: float):
 	if population_manager:
