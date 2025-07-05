@@ -107,30 +107,31 @@ func setup_camera():
 	add_child(camera)
 
 func spawn_test_car():
-	# Generate a random car for testing
-	var frame_codes = ["R", "W"]
-	var powertrain_codes = ["C", "D", "G"]
-	
-	var frame = []
-	var powertrain = []
-	var dna_length = randi_range(3, 6)
+	# Generate a random DNA string for testing
+	var chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	var dna_string = ""
+	var dna_length = randi_range(8, 16)
 	
 	for i in range(dna_length):
-		frame.append(frame_codes.pick_random())
-		powertrain.append(powertrain_codes.pick_random())
+		dna_string += chars[randi() % chars.length()]
 	
-	var car_dna = {"frame": frame, "powertrain": powertrain}
+	# Create CarDNA and translate it for display
+	var car_dna_obj = CarDNA.new(dna_string)
+	var translated = car_dna_obj.translate_to_frame_and_powertrain()
+	
+	var car_dna_dict = {"dna_string": dna_string}
 	
 	# Build the car using the simulation scene
-	current_car = simulation_scene.build_car_from_dna(car_dna, 0)
+	current_car = simulation_scene.build_car_from_dna(car_dna_dict, 0)
 	if current_car:
 		simulation_scene.add_child(current_car)
-		info_label.text = "Frame: %s\nPowertrain: %s" % [str(frame), str(powertrain)]
+		info_label.text = "DNA: '%s'\nFrame: %s\nPowertrain: %s" % [dna_string, str(translated.frame), str(translated.powertrain)]
 		
 		# Reset timer
 		test_timer = 0.0
 		
-		print("Spawned test car with DNA: Frame=%s, Powertrain=%s" % [frame, powertrain])
+		print("Spawned test car with DNA string: '", dna_string, "'")
+		print("  Translated to - Frame: ", translated.frame, ", Powertrain: ", translated.powertrain)
 
 func _process(delta):
 	test_timer += delta

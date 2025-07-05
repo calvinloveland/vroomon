@@ -7,11 +7,8 @@ extends Node2D
 signal generation_completed(generation: int, best_score: float)
 signal evolution_finished(final_best_car)
 
-const FRAME_CODES = ["R", "W"]  # R = Rectangle, W = Wheel
-const POWERTRAIN_CODES = ["C", "D", "G"]  # C = Cylinder, D = DriveShaft, G = GearSet
-
 var population_size: int = 20
-var dna_length: int = 5
+var dna_length: int = 12  # Target length for DNA strings
 var generations: int = 10
 var retain_ratio: float = 0.5
 var mutation_rate: float = 0.1
@@ -40,6 +37,7 @@ func start_evolution():
 		
 	is_running = true
 	print("Car Evolution Simulation Starting...")
+	print("Using new alphanumeric DNA string format")
 	
 	# Generate initial population
 	population = initialize_population(population_size, dna_length)
@@ -48,23 +46,25 @@ func start_evolution():
 	# Start evolution
 	run_evolution()
 
-func initialize_population(size: int, length: int) -> Array:
+func initialize_population(size: int, target_length: int) -> Array:
 	var pop = []
 	for i in range(size):
-		var dna = generate_random_dna(length)
+		var dna = generate_random_dna(target_length)
 		var car = Car.new(dna)
 		pop.append(car)
 	return pop
 
-func generate_random_dna(length: int) -> CarDNA:
-	var frame = []
-	var powertrain = []
+func generate_random_dna(target_length: int) -> CarDNA:
+	"""Generate a random DNA string of the target length"""
+	var chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	var dna_string = ""
 	
-	for i in range(length):
-		frame.append(FRAME_CODES.pick_random())
-		powertrain.append(POWERTRAIN_CODES.pick_random())
+	var actual_length = randi_range(max(3, target_length - 4), target_length + 4)
 	
-	return CarDNA.new(frame, powertrain)
+	for i in range(actual_length):
+		dna_string += chars[randi() % chars.length()]
+	
+	return CarDNA.new(dna_string)
 
 func run_evolution():
 	for gen in range(generations):
@@ -79,7 +79,11 @@ func run_evolution():
 		
 		var best_car = population[0]
 		print("Best score: ", best_car.score)
-		print("Best car DNA: Frame=", best_car.dna.frame, " Powertrain=", best_car.dna.powertrain)
+		print("Best car DNA: '", best_car.get_dna_string(), "'")
+		
+		# Show what the DNA translates to for debugging
+		var translated = best_car.get_translated_dna()
+		print("  Translated to - Frame: ", translated.frame, ", Powertrain: ", translated.powertrain)
 		
 		emit_signal("generation_completed", gen + 1, best_car.score)
 		
@@ -90,7 +94,10 @@ func run_evolution():
 	# Final results
 	var final_best = population[0]
 	print("Evolution complete! Final best score: ", final_best.score)
-	print("Final best DNA: Frame=", final_best.dna.frame, " Powertrain=", final_best.dna.powertrain)
+	print("Final best DNA: '", final_best.get_dna_string(), "'")
+	
+	var final_translated = final_best.get_translated_dna()
+	print("Final translation - Frame: ", final_translated.frame, ", Powertrain: ", final_translated.powertrain)
 	
 	is_running = false
 	emit_signal("evolution_finished", final_best)
@@ -110,7 +117,7 @@ func score_population_async(pop: Array):
 	for i in range(pop.size()):
 		if i < race_results.size():
 			pop[i].score = race_results[i].score
-			print("  Car ", i + 1, " score: ", race_results[i].score)
+			print("  Car ", i + 1, " ('", pop[i].get_dna_string(), "') score: ", race_results[i].score)
 		else:
 			pop[i].score = 0.0
 
@@ -128,6 +135,7 @@ func evolve_population(scored_pop: Array) -> Array:
 		survivors.append(scored_pop[i])
 	
 	print("  Survivors: ", survivors.size(), " cars")
+	print("  Top survivor DNA: '", survivors[0].get_dna_string(), "'")
 	
 	# Generate children through reproduction
 	var children = []

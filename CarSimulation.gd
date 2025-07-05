@@ -120,11 +120,26 @@ func build_car_from_dna(dna_dict: Dictionary, car_index: int) -> RigidBody2D:
 	car_body.collision_layer = 1 << car_layer  # Car exists on its own layer
 	car_body.collision_mask = 1  # Car only collides with ground (layer 1)
 	
-	var frame_parts = dna_dict.get("frame", [])
-	var powertrain_parts = dna_dict.get("powertrain", [])
+	# Handle both old and new DNA formats for compatibility
+	var frame_parts = []
+	var powertrain_parts = []
+	var car_dna: CarDNA = null
+	
+	# Check if this is new DNA string format or old format
+	if dna_dict.has("dna_string"):
+		# New DNA string format
+		car_dna = CarDNA.new()
+		car_dna.from_dict(dna_dict)
+		var translated = car_dna.translate_to_frame_and_powertrain()
+		frame_parts = translated.frame
+		powertrain_parts = translated.powertrain
+	else:
+		# Old format for backward compatibility
+		frame_parts = dna_dict.get("frame", [])
+		powertrain_parts = dna_dict.get("powertrain", [])
 	
 	if frame_parts.size() == 0:
-		push_error("Car has no frame parts")
+		push_error("Car has no frame parts - DNA: " + str(dna_dict))
 		return null
 	
 	# Build connected car structure
@@ -140,14 +155,15 @@ func build_car_from_dna(dna_dict: Dictionary, car_index: int) -> RigidBody2D:
 		
 		x_offset += 50
 	
-	# Add wheels and connect them properly
+	# Add wheels and connect them properly with enhanced parameters from DNA
 	x_offset = 0
 	for i in range(frame_parts.size()):
 		var frame_code = frame_parts[i]
 		
 		if frame_code == "W":
-			var wheel_power = _calculate_wheel_power(powertrain_parts, i)
-			var wheel_body = _add_connected_wheel(car_body, Vector2(x_offset, 35), wheel_power, car_index, car_layer)
+			var wheel_power = _calculate_wheel_power(powertrain_parts, i, car_dna, i)
+			var wheel_size = _get_wheel_size_from_dna(car_dna, i)
+			var wheel_body = _add_connected_wheel(car_body, Vector2(x_offset, 35), wheel_power, car_index, car_layer, wheel_size)
 			if wheel_body:
 				all_bodies.append(wheel_body)
 		
@@ -158,7 +174,7 @@ func build_car_from_dna(dna_dict: Dictionary, car_index: int) -> RigidBody2D:
 	
 	return car_body
 
-func _add_rectangle_to_car(car_body: RigidBody2D, offset: Vector2, car_index: int, car_layer: int):
+func _add_rectangle_to_car(car_body: RigidBody2D, offset: Vector2, car_index: int, _car_layer: int):
 	var rect_shape = RectangleShape2D.new()
 	rect_shape.size = Vector2(45, 25)
 	
@@ -175,7 +191,16 @@ func _add_rectangle_to_car(car_body: RigidBody2D, offset: Vector2, car_index: in
 	visual.color = Color.from_hsv(float(car_index) / 20.0, 0.6, 0.8)
 	collision.add_child(visual)
 
-func _add_connected_wheel(car_body: RigidBody2D, offset: Vector2, power: float, car_index: int, car_layer: int) -> RigidBody2D:
+func _get_wheel_size_from_dna(car_dna: CarDNA, wheel_pos: int) -> Vector2:
+	"""Get wheel size from DNA string, fallback to default if old format"""
+	if car_dna:
+		var size = car_dna.get_wheel_size(wheel_pos)
+		return Vector2(size, size)
+	else:
+		# Default size for old format
+		return Vector2(36, 36)
+
+func _add_connected_wheel(car_body: RigidBody2D, offset: Vector2, power: float, car_index: int, car_layer: int, wheel_size: Vector2 = Vector2(36, 36)) -> RigidBody2D:
 	var wheel_body = RigidBody2D.new()
 	wheel_body.position = car_body.position + offset
 	wheel_body.mass = 3.0
@@ -187,7 +212,7 @@ func _add_connected_wheel(car_body: RigidBody2D, offset: Vector2, power: float, 
 	wheel_body.collision_mask = 1  # Only collides with ground
 	
 	var circle_shape = CircleShape2D.new()
-	circle_shape.radius = 18
+	circle_shape.radius = wheel_size.x / 2  # Use custom size from DNA
 	
 	var collision = CollisionShape2D.new()
 	collision.shape = circle_shape
@@ -195,8 +220,8 @@ func _add_connected_wheel(car_body: RigidBody2D, offset: Vector2, power: float, 
 	
 	# Visual representation
 	var visual = ColorRect.new()
-	visual.size = Vector2(36, 36)
-	visual.position = Vector2(-18, -18)
+	visual.size = wheel_size
+	visual.position = Vector2(-wheel_size.x/2, -wheel_size.y/2)
 	visual.color = Color.from_hsv(float(car_index) / 20.0, 1.0, 0.9)
 	collision.add_child(visual)
 	
@@ -215,24 +240,32 @@ func _add_connected_wheel(car_body: RigidBody2D, offset: Vector2, power: float, 
 	
 	return wheel_body
 
-func _calculate_wheel_power(powertrain_parts: Array, wheel_position: int) -> float:
+func _calculate_wheel_power(powertrain_parts: Array, wheel_position: int, car_dna: CarDNA = null, dna_index: int = 0) -> float:
 	var current_power = 0.0
-	var current_torque = 10000.0
+	var _current_torque = 10000.0
+	
+	# Use DNA-based power factors if available
+	var power_factor = 1.0
+	var efficiency_factor = 1.0
+	
+	if car_dna:
+		power_factor = car_dna.get_power_factor(dna_index)
+		efficiency_factor = car_dna.get_efficiency_factor(dna_index)
 	
 	for i in range(min(powertrain_parts.size(), wheel_position + 1)):
 		var part_code = powertrain_parts[i]
 		match part_code:
 			"C":  # Cylinder
-				current_power += randf_range(50.0, 150.0)
+				current_power += randf_range(50.0, 150.0) * power_factor
 			"D":  # DriveShaft
-				var efficiency = randf_range(0.85, 0.95)
+				var efficiency = randf_range(0.85, 0.95) * efficiency_factor
 				current_power *= efficiency
-				current_torque *= efficiency
+				_current_torque *= efficiency
 			"G":  # GearSet
 				var input_ratio = randf_range(0.7, 1.5)
 				var wheel_proportion = randf_range(0.2, 0.8)
 				current_power *= input_ratio
-				current_torque /= input_ratio
+				_current_torque /= input_ratio
 				if i == wheel_position:
 					return current_power * wheel_proportion
 	

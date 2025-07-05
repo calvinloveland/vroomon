@@ -4,10 +4,6 @@ extends RefCounted
 # Individual car representation with DNA and genetic operations
 # Handles mutation and reproduction for the genetic algorithm
 
-const FRAME_CODES = ["R", "W"]  # R = Rectangle, W = Wheel
-const POWERTRAIN_CODES = ["C", "D", "G"]  # C = Cylinder, D = DriveShaft, G = GearSet
-const SEQUENCE_LENGTH = 3
-
 var dna: CarDNA
 var score: float = 0.0
 
@@ -18,62 +14,104 @@ func _init(car_dna: CarDNA = null):
 		dna = CarDNA.new()
 
 func mutate() -> Car:
-	var replace_p = 0.10
+	"""Mutate the car's DNA string using various string operations"""
+	var mutated_string = dna.get_dna_string()
+	var replace_p = 0.15
 	var remove_p = 0.05
-	var insert_p = 0.05
+	var insert_p = 0.10
 	
-	var new_frame = dna.frame.duplicate()
-	var new_powertrain = dna.powertrain.duplicate()
-	var pairs = []
-	
-	for i in range(new_frame.size()):
-		pairs.append([new_frame[i], new_powertrain[i]])
+	# Convert to character array for easier manipulation
+	var chars = []
+	for i in range(mutated_string.length()):
+		chars.append(mutated_string[i])
 	
 	var i = 0
-	while i < pairs.size():
+	while i < chars.size():
 		var r = randf()
 		if r < replace_p:
-			pairs[i] = [FRAME_CODES.pick_random(), POWERTRAIN_CODES.pick_random()]
+			# Replace character with random alphanumeric
+			chars[i] = _get_random_char()
 			i += 1
-		elif r < replace_p + remove_p and pairs.size() > 1:
-			pairs.remove_at(i)
+		elif r < replace_p + remove_p and chars.size() > 3:
+			# Remove character (but keep minimum length)
+			chars.remove_at(i)
 		elif r < replace_p + remove_p + insert_p:
-			pairs.insert(i, [FRAME_CODES.pick_random(), POWERTRAIN_CODES.pick_random()])
+			# Insert random character
+			chars.insert(i, _get_random_char())
 			i += 1
 		else:
 			i += 1
 	
-	var mutated_frame = []
-	var mutated_powertrain = []
-	for pair in pairs:
-		mutated_frame.append(pair[0])
-		mutated_powertrain.append(pair[1])
+	# Convert back to string
+	var new_dna_string = ""
+	for character in chars:
+		new_dna_string += character
 	
-	var mutated_dna = CarDNA.new(mutated_frame, mutated_powertrain)
+	var mutated_dna = CarDNA.new(new_dna_string)
 	return Car.new(mutated_dna)
 
+func _get_random_char() -> String:
+	"""Get a random alphanumeric character"""
+	var chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	return chars[randi() % chars.length()]
+
 static func reproduce(car1: Car, car2: Car) -> Car:
-	var mother = [car1, car2].pick_random()
-	var other = car1 if mother == car2 else car2
+	"""Reproduce two cars by combining their DNA strings"""
+	var dna1 = car1.dna.get_dna_string()
+	var dna2 = car2.dna.get_dna_string()
 	
-	# Deep copy mother's DNA
-	var child_frame = mother.dna.frame.duplicate()
-	var child_powertrain = mother.dna.powertrain.duplicate()
+	# Simple string crossover - take sections from each parent
+	var child_dna = ""
+	var max_length = max(dna1.length(), dna2.length())
 	
-	# Crossover with bounds checking to fix IndexError bug from Python version
-	for idx in range(child_frame.size()):
+	for i in range(max_length):
 		if randf() < 0.5:
-			for j in range(SEQUENCE_LENGTH):
-				var target_idx = idx + j
-				if target_idx < child_frame.size() and target_idx < other.dna.frame.size():
-					child_frame[target_idx] = other.dna.frame[target_idx]
-		
-		if randf() < 0.5:
-			for j in range(SEQUENCE_LENGTH):
-				var target_idx = idx + j
-				if target_idx < child_powertrain.size() and target_idx < other.dna.powertrain.size():
-					child_powertrain[target_idx] = other.dna.powertrain[target_idx]
+			# Take from parent 1
+			if i < dna1.length():
+				child_dna += dna1[i]
+		else:
+			# Take from parent 2
+			if i < dna2.length():
+				child_dna += dna2[i]
 	
-	var child_dna = CarDNA.new(child_frame, child_powertrain)
-	var child = Car.new(child_dna)
+	# Alternative crossover method: take chunks
+	if randf() < 0.3:  # 30% chance to use chunk crossover
+		child_dna = _chunk_crossover(dna1, dna2)
+	
+	var child_car_dna = CarDNA.new(child_dna)
+	var child = Car.new(child_car_dna)
 	return child.mutate()
+
+static func _chunk_crossover(dna1: String, dna2: String) -> String:
+	"""Perform chunk-based crossover between two DNA strings"""
+	var result = ""
+	var pos = 0
+	
+	while pos < max(dna1.length(), dna2.length()):
+		var chunk_size = randi_range(1, 4)
+		var use_first = randf() < 0.5
+		
+		for i in range(chunk_size):
+			if pos + i >= max(dna1.length(), dna2.length()):
+				break
+			
+			if use_first and pos + i < dna1.length():
+				result += dna1[pos + i]
+			elif not use_first and pos + i < dna2.length():
+				result += dna2[pos + i]
+			elif pos + i < dna1.length():
+				result += dna1[pos + i]
+			elif pos + i < dna2.length():
+				result += dna2[pos + i]
+		
+		pos += chunk_size
+	
+	return result
+
+func get_translated_dna() -> Dictionary:
+	"""Get the translated frame and powertrain from the DNA string"""
+	return dna.translate_to_frame_and_powertrain()
+
+func get_dna_string() -> String:
+	"""Get the raw DNA string"""
+	return dna.get_dna_string()
