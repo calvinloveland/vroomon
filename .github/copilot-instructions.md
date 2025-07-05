@@ -18,11 +18,11 @@ This is a genetic algorithm-based car evolution simulator built in Godot 4. Cars
 - **Backward Compatibility**: System supports old `{"frame": [], "powertrain": []}` format
 
 ### Key Classes and Their Responsibilities
-- `CarDNA.gd`: DNA string validation, translation to components, parameter extraction
-- `CarSimulation.gd`: Physics simulation, car construction from DNA, racing environment
-- `PopulationManager.gd`: Genetic algorithm operations (string-based crossover, mutation)
-- `GameManager.gd`: Overall game flow coordination and state management
-- `Car.gd`: Individual car behavior with simplified string genetic operations
+- `scripts/CarDNA.gd`: DNA string validation, translation to components, parameter extraction
+- `scripts/CarSimulation.gd`: Physics simulation, car construction from DNA, racing environment
+- `scripts/PopulationManager.gd`: Genetic algorithm operations (string-based crossover, mutation)
+- `scenes/GameManager.gd`: Overall game flow coordination and state management
+- `scripts/Car.gd`: Individual car behavior with simplified string genetic operations
 
 ### Physics and Collision System
 - Uses Godot 4 physics engine with multi-layer collision detection
@@ -127,10 +127,11 @@ var power_factor = dna.get_power_factor(1)  # Power factor for second position
 ```
 
 ### Debug DNA Issues
-- Check DNA string validation in `CarDNA._validate_and_clean_dna()`
+- Check DNA string validation in `CarDNA._validate_and_clean_dna()` (currently uses `is_valid_identifier()` and `is_valid_int()`)
 - Verify translation consistency by testing same DNA string multiple times
 - Monitor for edge cases in character-to-parameter mapping
-- Ensure DNA strings maintain alphanumeric characters after genetic operations
+- Ensure DNA strings maintain valid characters after genetic operations
+- Note: Current validation may exclude some valid alphanumeric characters
 
 ## Error Handling
 - Always validate DNA strings before car construction using `CarDNA._validate_and_clean_dna()`
@@ -144,5 +145,29 @@ var power_factor = dna.get_power_factor(1)  # Power factor for second position
 - New DNA format: `{"dna_string": "alphanumeric_string"}`
 - Migration path: Convert old arrays to representative DNA strings if needed
 - All new population generation uses alphanumeric DNA string format
+
+## Current Project Structure
+```
+/home/calvin/vroomon/
+├── project.godot
+├── README.md
+├── assets/
+│   ├── icon.svg
+│   └── icon.svg.import
+├── scenes/
+│   ├── GameManager.gd & GameManager.tscn
+│   ├── Main.gd & Main.tscn
+│   ├── MainMenu.gd & MainMenu.tscn
+│   ├── TestDrive.gd & TestDrive.tscn
+│   └── root.tscn
+├── scripts/
+│   ├── Car.gd & Car.gd.uid
+│   ├── CarDNA.gd & CarDNA.gd.uid
+│   ├── CarSimulation.gd & CarSimulation.gd.uid
+│   ├── PopulationManager.gd & PopulationManager.gd.uid
+│   └── population.gd & population.gd.uid
+└── old_code/
+    └── vroomon/ (Python reference implementation)
+```
 
 When working on this project, prioritize genetic algorithm correctness with string-based DNA, physics stability with DNA-derived parameters, and maintainable code structure that supports both DNA formats.

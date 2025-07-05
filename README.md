@@ -141,11 +141,11 @@ Cars are procedurally built from DNA with:
 
 ## Key Classes
 
-- **`CarDNA`**: Handles DNA string validation, translation, and parameter extraction
-- **`CarSimulation`**: Handles physics simulation, car construction, and racing
-- **`PopulationManager`**: Manages genetic algorithm operations and evolution
-- **`GameManager`**: Coordinates overall game flow and state management
-- **`Car`**: Individual car behavior with simplified string-based genetic operations
+- **`scripts/CarDNA`**: Handles DNA string validation, translation, and parameter extraction
+- **`scripts/CarSimulation`**: Handles physics simulation, car construction, and racing
+- **`scripts/PopulationManager`**: Manages genetic algorithm operations and evolution
+- **`scenes/GameManager`**: Coordinates overall game flow and state management
+- **`scripts/Car`**: Individual car behavior with simplified string-based genetic operations
 
 ## Development
 
