@@ -11,9 +11,9 @@ config_version=5
 [application]
 
 config/name="Vroomon"
-run/main_scene="res://GameManager.tscn"
+run/main_scene="uid://dmar3sn5y1pqr"
 config/features=PackedStringArray("4.4", "GL Compatibility")
-config/icon="res://icon.svg"
+config/icon="uid://dse5t5f1vye5a"
 
 [rendering]
 

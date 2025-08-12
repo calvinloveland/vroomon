@@ -14,6 +14,7 @@ extends Control
 @onready var camera: Camera2D
 
 var is_evolution_running: bool = false
+var wallet_label: Label
 
 func _ready():
 	setup_ui()
@@ -26,7 +27,7 @@ func setup_ui():
 	overlay_panel.position = Vector2(10, 10)
 	overlay_panel.custom_minimum_size = Vector2(300, 400)
 	add_child(overlay_panel)
-	
+
 	# Add semi-transparent background
 	var background = ColorRect.new()
 	background.color = Color(0, 0, 0, 0.7)  # Semi-transparent black
@@ -35,24 +36,24 @@ func setup_ui():
 	add_child(background)
 	background.move_to_front()
 	overlay_panel.move_to_front()
-	
+
 	# Title
 	var title = Label.new()
 	title.text = "Car Evolution"
 	title.add_theme_font_size_override("font_size", 20)
 	title.modulate = Color.WHITE
 	overlay_panel.add_child(title)
-	
+
 	# Settings
 	settings_panel = VBoxContainer.new()
 	overlay_panel.add_child(settings_panel)
-	
+
 	var settings_label = Label.new()
 	settings_label.text = "Settings:"
 	settings_label.add_theme_font_size_override("font_size", 14)
 	settings_label.modulate = Color.WHITE
 	settings_panel.add_child(settings_label)
-	
+
 	# Population size
 	var pop_hbox = HBoxContainer.new()
 	settings_panel.add_child(pop_hbox)
@@ -68,7 +69,7 @@ func setup_ui():
 	pop_spinbox.custom_minimum_size.x = 80
 	pop_spinbox.value_changed.connect(_on_population_size_changed)
 	pop_hbox.add_child(pop_spinbox)
-	
+
 	# Generations
 	var gen_hbox = HBoxContainer.new()
 	settings_panel.add_child(gen_hbox)
@@ -84,7 +85,7 @@ func setup_ui():
 	gen_spinbox.custom_minimum_size.x = 80
 	gen_spinbox.value_changed.connect(_on_generations_changed)
 	gen_hbox.add_child(gen_spinbox)
-	
+
 	# DNA length
 	var dna_hbox = HBoxContainer.new()
 	settings_panel.add_child(dna_hbox)
@@ -100,69 +101,97 @@ func setup_ui():
 	dna_spinbox.custom_minimum_size.x = 80
 	dna_spinbox.value_changed.connect(_on_dna_length_changed)
 	dna_hbox.add_child(dna_spinbox)
-	
+
+	# Area preset
+	var area_hbox = HBoxContainer.new()
+	settings_panel.add_child(area_hbox)
+	var area_label = Label.new()
+	area_label.text = "Area:"
+	area_label.custom_minimum_size.x = 80
+	area_label.modulate = Color.WHITE
+	area_hbox.add_child(area_label)
+	var area_option = OptionButton.new()
+	# Populate options sorted alphabetically
+	var names = AreaConfigs.get_presets().keys()
+	names.sort()
+	for name in names:
+		area_option.add_item(name)
+	# Default select Grassland if present
+	for i in range(area_option.get_item_count()):
+		if area_option.get_item_text(i) == "Grassland":
+			area_option.select(i)
+			break
+	area_option.item_selected.connect(func(index): _on_area_changed(area_option.get_item_text(index)))
+	area_hbox.add_child(area_option)
+
 	# Spacer
 	var spacer1 = Control.new()
 	spacer1.custom_minimum_size.y = 10
 	overlay_panel.add_child(spacer1)
-	
+
 	# Button container
 	var button_container = HBoxContainer.new()
 	overlay_panel.add_child(button_container)
-	
+
 	# Back button
 	back_button = Button.new()
 	back_button.text = "🏠 Menu"
 	back_button.custom_minimum_size = Vector2(80, 35)
 	back_button.pressed.connect(_on_back_pressed)
 	button_container.add_child(back_button)
-	
+
 	start_button = Button.new()
 	start_button.text = "Start Evolution"
 	start_button.custom_minimum_size = Vector2(180, 35)
 	start_button.pressed.connect(_on_start_button_pressed)
 	overlay_panel.add_child(start_button)
-	
+
 	# Spacer
 	var spacer2 = Control.new()
 	spacer2.custom_minimum_size.y = 15
 	overlay_panel.add_child(spacer2)
-	
+
 	# Progress info
 	generation_label = Label.new()
 	generation_label.text = "Generation: Not started"
 	generation_label.add_theme_font_size_override("font_size", 12)
 	generation_label.modulate = Color.WHITE
 	overlay_panel.add_child(generation_label)
-	
+
 	best_score_label = Label.new()
 	best_score_label.text = "Best Score: --"
 	best_score_label.add_theme_font_size_override("font_size", 12)
 	best_score_label.modulate = Color.WHITE
 	overlay_panel.add_child(best_score_label)
-	
+
+	wallet_label = Label.new()
+	wallet_label.text = "Wallet: $0"
+	wallet_label.add_theme_font_size_override("font_size", 12)
+	wallet_label.modulate = Color.WHITE
+	overlay_panel.add_child(wallet_label)
+
 	progress_bar = ProgressBar.new()
 	progress_bar.custom_minimum_size.y = 20
 	progress_bar.show_percentage = false
 	overlay_panel.add_child(progress_bar)
-	
+
 	status_label = Label.new()
 	status_label.text = "Ready to start"
 	status_label.add_theme_font_size_override("font_size", 11)
 	status_label.modulate = Color.LIGHT_GRAY
 	overlay_panel.add_child(status_label)
-	
+
 	# Camera controls info
 	var spacer3 = Control.new()
 	spacer3.custom_minimum_size.y = 15
 	overlay_panel.add_child(spacer3)
-	
+
 	var controls_label = Label.new()
 	controls_label.text = "Controls:"
 	controls_label.add_theme_font_size_override("font_size", 12)
 	controls_label.modulate = Color.WHITE
 	overlay_panel.add_child(controls_label)
-	
+
 	var controls_info = Label.new()
 	controls_info.text = "• Arrow keys: Move camera\n• Mouse wheel: Zoom\n• Space: Follow leader\n• ESC: Quit"
 	controls_info.add_theme_font_size_override("font_size", 10)
@@ -179,24 +208,27 @@ func setup_camera():
 func setup_population_manager():
 	population_manager = PopulationManager.new()
 	add_child(population_manager)
-	
+
 	# Connect signals
 	population_manager.generation_completed.connect(_on_generation_completed)
 	population_manager.evolution_finished.connect(_on_evolution_finished)
+	# Initialize area preset
+	if population_manager.has_method("set_area_preset"):
+		population_manager.set_area_preset("Grassland")
 
 func _input(event):
 	# Handle escape key
 	if event.is_action_pressed("ui_cancel"):
 		get_tree().quit()
 		return
-	
+
 	if not camera:
 		return
-	
+
 	# Camera controls
 	var camera_speed = 300.0 / camera.zoom.x  # Adjust speed based on zoom
 	var zoom_speed = 0.15
-	
+
 	if event.is_action_pressed("ui_left"):
 		camera.position.x -= camera_speed
 	elif event.is_action_pressed("ui_right"):
@@ -207,7 +239,7 @@ func _input(event):
 		camera.position.y += camera_speed
 	elif event.is_action_pressed("ui_accept"):  # Space key
 		_follow_leader()
-	
+
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			camera.zoom *= (1.0 + zoom_speed)
@@ -220,29 +252,34 @@ func _follow_leader():
 	# Find the car that's farthest ahead and follow it
 	var leader_position = Vector2(200, 250)
 	var max_distance = -999999.0
-	
+
 	if population_manager and population_manager.simulation_scene:
 		for child in population_manager.simulation_scene.get_children():
 			if child is RigidBody2D and "Car_" in child.name:
 				if child.position.x > max_distance:
 					max_distance = child.position.x
 					leader_position = child.position
-	
+
 	camera.position = leader_position
+
+func _on_area_changed(name: String) -> void:
+	if population_manager and population_manager.has_method("set_area_preset"):
+		population_manager.set_area_preset(name)
+		status_label.text = "Area set to %s" % name
 
 func _on_start_button_pressed():
 	if is_evolution_running:
 		return
-	
+
 	is_evolution_running = true
 	start_button.text = "Running..."
 	start_button.disabled = true
 	settings_panel.modulate = Color.GRAY
-	
+
 	status_label.text = "Starting evolution..."
 	progress_bar.value = 0
 	progress_bar.max_value = population_manager.generations
-	
+
 	# Start the evolution process
 	population_manager.start_evolution()
 
@@ -263,7 +300,7 @@ func _on_back_confirmed():
 	is_evolution_running = false
 	if population_manager:
 		population_manager.stop_evolution()
-	
+
 	# Go back to the menu
 	_go_to_menu()
 
@@ -271,14 +308,16 @@ func _go_to_menu():
 	# Here you would typically change to the main menu scene
 	# For now, we just print a message and reset the UI
 	print("Going back to menu...")
-	
+
 	# Reset UI elements
 	generation_label.text = "Generation: Not started"
 	best_score_label.text = "Best Score: --"
+	if wallet_label:
+		wallet_label.text = "Wallet: $%d" % 0
 	progress_bar.value = 0
 	status_label.text = "Ready to start"
 	status_label.modulate = Color.LIGHT_GRAY
-	
+
 	# Enable buttons
 	start_button.disabled = false
 	start_button.text = "Start Evolution"
@@ -301,9 +340,11 @@ func _on_dna_length_changed(value: float):
 func _on_generation_completed(generation: int, best_score: float):
 	generation_label.text = "Generation: %d/%d" % [generation, population_manager.generations]
 	best_score_label.text = "Best Score: %.1f" % best_score
+	if wallet_label:
+		wallet_label.text = "Wallet: $%d" % population_manager.wallet
 	progress_bar.value = generation
 	status_label.text = "Racing generation %d..." % generation
-	
+
 	print("UI: Generation %d completed with best score: %.1f" % [generation, best_score])
 
 func _on_evolution_finished(final_best_car):
@@ -311,48 +352,48 @@ func _on_evolution_finished(final_best_car):
 	start_button.text = "Start Evolution"
 	start_button.disabled = false
 	settings_panel.modulate = Color.WHITE
-	
+
 	status_label.text = "Evolution completed!"
 	status_label.modulate = Color.GREEN
-	
+
 	print("UI: Evolution finished!")
-	
+
 	# Show completion dialog
 	show_completion_dialog(final_best_car)
 
 func show_completion_dialog(best_car):
 	var dialog = AcceptDialog.new()
 	dialog.title = "Evolution Complete!"
-	
+
 	var content = VBoxContainer.new()
-	
+
 	var result_label = Label.new()
 	result_label.text = "Evolution completed successfully!"
 	result_label.add_theme_font_size_override("font_size", 16)
 	content.add_child(result_label)
-	
+
 	var score_label = Label.new()
 	score_label.text = "Final Best Score: %.2f" % best_car.score
 	score_label.add_theme_font_size_override("font_size", 14)
 	content.add_child(score_label)
-	
+
 	var dna_label = Label.new()
 	dna_label.text = "Best Car DNA:"
 	dna_label.add_theme_font_size_override("font_size", 14)
 	content.add_child(dna_label)
-	
+
 	var frame_label = Label.new()
 	frame_label.text = "Frame: %s" % str(best_car.dna.frame)
 	frame_label.add_theme_font_size_override("font_size", 12)
 	content.add_child(frame_label)
-	
+
 	var powertrain_label = Label.new()
 	powertrain_label.text = "Powertrain: %s" % str(best_car.dna.powertrain)
 	powertrain_label.add_theme_font_size_override("font_size", 12)
 	content.add_child(powertrain_label)
-	
+
 	dialog.add_child(content)
 	add_child(dialog)
 	dialog.popup_centered()
-	
+
 	dialog.confirmed.connect(func(): dialog.queue_free())

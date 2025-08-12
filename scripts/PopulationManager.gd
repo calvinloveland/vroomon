@@ -18,18 +18,33 @@ var population: Array = []
 var simulation_scene: Node2D
 var is_running: bool = false
 
+# Simple economy
+var wallet: int = 0
+var area_name: String = "Grassland"
+
 func _ready():
 	# Load the simulation scene
 	setup_simulation()
 
 func setup_simulation():
-	var simulation_script = load("res://CarSimulation.gd")
+	var simulation_script = load("res://scripts/CarSimulation.gd")
 	simulation_scene = Node2D.new()
 	simulation_scene.set_script(simulation_script)
 	add_child(simulation_scene)
 	
 	# Connect signals
 	simulation_scene.simulation_completed.connect(_on_simulation_completed)
+	
+	# Set default area config
+	if simulation_scene.has_method("set_area_config"):
+		var config = AreaConfigs.get_preset(area_name)
+		simulation_scene.set_area_config(config)
+
+func set_area_preset(name: String) -> void:
+	area_name = name
+	if simulation_scene and simulation_scene.has_method("set_area_config"):
+		var config = AreaConfigs.get_preset(area_name)
+		simulation_scene.set_area_config(config)
 
 func start_evolution():
 	if is_running:
@@ -86,6 +101,9 @@ func run_evolution():
 		print("  Translated to - Frame: ", translated.frame, ", Powertrain: ", translated.powertrain)
 		
 		emit_signal("generation_completed", gen + 1, best_car.score)
+		
+		# Economy update (simple): earn based on best score
+		wallet += int(max(0.0, best_car.score) / 50.0)
 		
 		# Evolve population for next generation
 		if gen < generations - 1:  # Don't evolve after final generation

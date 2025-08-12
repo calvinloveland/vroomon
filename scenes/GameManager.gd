@@ -11,9 +11,9 @@ var test_drive_scene: PackedScene
 
 func _ready():
 	# Load scene resources
-	main_menu_scene = preload("res://MainMenu.tscn")
-	evolution_scene = preload("res://Main.tscn")
-	test_drive_scene = preload("res://TestDrive.tscn")
+	main_menu_scene = preload("res://scenes/MainMenu.tscn")
+	evolution_scene = preload("res://scenes/Main.tscn")
+	test_drive_scene = preload("res://scenes/TestDrive.tscn")
 	
 	# Start with main menu - defer to avoid "busy setting up children" error
 	call_deferred("switch_to_main_menu")

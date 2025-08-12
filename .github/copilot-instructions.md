@@ -1,159 +1,136 @@
-# Car Evolution Simulation - Copilot Instructions
+# Car Evolution Simulation – Copilot Instructions
+
+These are workspace instructions for GitHub Copilot. Use this as persistent context when proposing code, refactors, or docs in this repository.
 
 ## Project Overview
-This is a genetic algorithm-based car evolution simulator built in Godot 4. Cars with alphanumeric DNA strings compete in races and evolve over generations to become better at navigating terrain.
+Genetic algorithm-based car evolution simulator built in Godot 4. Cars are defined by alphanumeric DNA strings that translate deterministically into chassis and powertrain. Populations race, are scored, and evolve over generations.
+
+## Important Godot Resource Path Conventions
+- Scripts live under `res://scripts/` and scenes under `res://scenes/`.
+- When loading or preloading, always use full paths:
+  - Correct: `preload("res://scenes/MainMenu.tscn")`
+  - Correct: `load("res://scripts/CarSimulation.gd")`
+  - Avoid root-relative shortcuts like `res://MainMenu.tscn` for files inside `scenes/`.
+- Use typed nodes and signals where practical (Godot 4).
 
 ## Core Architecture
 
-### DNA System
-- Cars are defined by **single alphanumeric DNA strings** that get translated into car components
-- **New Format**: `"A3x9K2m"` → Automatically translates to frame and powertrain sequences
-- **Translation Rules**:
-  - Car length determined by DNA string length (3-12 parts)
-  - Even ASCII values → Rectangle chassis (`R`)
-  - Odd ASCII values → Wheel attachment (`W`)
-  - ASCII % 3 determines powertrain: Cylinder (`C`), DriveShaft (`D`), GearSet (`G`)
-- **Parameters**: Character positions encode wheel sizes, power factors, efficiency values
-- **Universal Compatibility**: Any alphanumeric string produces a valid car design
-- **Backward Compatibility**: System supports old `{"frame": [], "powertrain": []}` format
+### DNA System (String-Based)
+- Single alphanumeric DNA string → translated into component sequences.
+- New format example: "A3x9K2m" → maps to Frame and Powertrain sequences.
+- Translation rules:
+  - Car length = clamp((dna.length % 10) + 3, 3, 12)
+  - Frame: even ASCII → Rectangle chassis `R`, odd ASCII → Wheel `W`
+  - Powertrain: ASCII % 3 → 0:`C` (Cylinder), 1:`D` (DriveShaft), 2:`G` (GearSet)
+- Parameters by position (bounded for stability):
+  - Wheel size: 15–35
+  - Power factor: 0.5–1.5
+  - Efficiency: 0.7–1.0
+- Universal compatibility: any alphanumeric string yields a valid car.
+- Backward compatibility: still accepts old `{ "frame": [], "powertrain": [] }` dict format.
 
-### Key Classes and Their Responsibilities
-- `scripts/CarDNA.gd`: DNA string validation, translation to components, parameter extraction
-- `scripts/CarSimulation.gd`: Physics simulation, car construction from DNA, racing environment
-- `scripts/PopulationManager.gd`: Genetic algorithm operations (string-based crossover, mutation)
-- `scenes/GameManager.gd`: Overall game flow coordination and state management
-- `scripts/Car.gd`: Individual car behavior with simplified string genetic operations
+### Key Classes and Files
+- `scripts/CarDNA.gd` (class `CarDNA`)
+  - DNA validation and cleaning, random generation
+  - Translation to frame/powertrain (`translate_to_frame_and_powertrain`)
+  - Parameter extraction (`get_wheel_size`, `get_power_factor`, `get_efficiency_factor`)
+- `scripts/Car.gd` (class `Car`)
+  - Holds `CarDNA`, score, mutation and reproduction (string-based)
+  - Crossover: per-char and optional chunk-based
+- `scripts/CarSimulation.gd` (scene script attached at runtime)
+  - Builds cars from DNA, Godot physics, race simulation, scoring, cleanup
+  - Collision layers: ground on layer 1; cars on unique layers (2–30) and only collide with ground
+- `scripts/PopulationManager.gd` (class `PopulationManager`)
+  - Evolution loop, population init, scoring via `CarSimulation`, selection, elitism, breeding
+- `scenes/GameManager.gd` (class `GameManager`)
+  - Scene switching between `MainMenu`, `Main`, `TestDrive`
 
-### Physics and Collision System
-- Uses Godot 4 physics engine with multi-layer collision detection
-- Each car gets its own collision layer (layers 2-30) to prevent car-to-car interference
-- Cars only collide with ground/obstacles (layer 1) for realistic racing
-- Wheels attached via PinJoint2D for suspension simulation
+## Coding Standards (GDScript)
+- snake_case for variables and functions; PascalCase for classes/constants.
+- Prefer explicit typing: `var speed: float = 0.0`.
+- Descriptive names for GA parameters.
+- Document complex GA operations and edge cases.
+- Keep string-DNA as the primary representation; preserve old dict format support.
 
-## Coding Standards
+## DNA String Best Practices
+- Validate to alphanumeric only; maintain minimum length of 3.
+- Handle edge cases (empty, single char, very long strings).
+- Deterministic mappings to ensure reproducibility.
+- Implement/maintain elitism so top DNA survives.
 
-### GDScript Conventions
-- Use snake_case for variables and functions
-- Use PascalCase for class names and constants
-- Prefer explicit typing: `var speed: float = 0.0`
-- Use descriptive variable names, especially for genetic algorithm parameters
-- Add documentation comments for complex genetic operations
+Note on current validation: `CarDNA._validate_and_clean_dna` uses `is_valid_identifier()` and `is_valid_int()` per character, which may exclude some valid alphanumeric characters. Prefer an explicit alphanumeric check when modifying.
 
-### DNA String Best Practices
-- Always validate DNA strings contain only alphanumeric characters
-- Handle edge cases in genetic operations (empty strings, single character DNA)
-- Maintain minimum DNA length of 3 characters for valid cars
-- Use deterministic character-to-component mapping for reproducible results
-- Implement elitism to preserve best-performing DNA strings
+## Genetic Algorithm Best Practices
+- Crossover: combine character sequences from parent DNA strings (single-point or chunk-based).
+- Mutation: character replace/insert/delete with balanced rates.
+- Always revalidate DNA after genetic ops; enforce min length 3.
+- Consistent, distance-based fitness with survival bonus.
+- Maintain diversity with moderate mutation and retain ratio.
 
-### Genetic Algorithm Best Practices
-- **String Crossover**: Combine character sequences from parent DNA strings
-- **Character Mutation**: Replace, insert, or delete individual characters
-- **Validation**: Ensure DNA strings remain valid after genetic operations
-- Use consistent fitness evaluation criteria
-- Maintain population diversity through balanced mutation rates
+Current defaults (PopulationManager):
+- `population_size`: 20
+- `dna_length` target: 12 (actual varies ±4)
+- `generations`: 10
+- `retain_ratio`: 0.5
+- `mutation_rate`: 0.1 (in addition to `Car.mutate()` internal rates: replace 15%, remove 5% (min len 3), insert 10%)
 
-### Physics Simulation Guidelines
-- Clean up physics bodies properly after each generation
-- Use appropriate collision masks and layers
-- Limit simulation time to prevent infinite races
-- Handle NaN values in physics calculations (reference old_code/tests for edge cases)
+## Physics & Collision System (Godot 4)
+- Physics tick rate: 60 (`Engine.physics_ticks_per_second`).
+- Race duration: 15s (`SIMULATION_TIME`).
+- Ground and obstacles on collision layer 1 only; cars on layers 2–30 and collide only with layer 1.
+- Wheels connected via `PinJoint2D`. Apply torque and forward impulse when in ground contact.
+- Terrain includes ramps/bumps; ensure performance for ~20–30 cars.
+- NaN/instability handling: bound parameters and add penalties if falling off-world (y > 600).
 
-## Domain-Specific Knowledge
-
-### DNA Translation Process
-- **Character Mapping**: ASCII values determine component types via modulo operations
-- **Position-Based Parameters**: Character position affects wheel size (15-35), power factor (0.5-1.5), efficiency (0.7-1.0)
-- **Deterministic Output**: Same DNA string always produces identical car design
-- **Bounded Parameters**: All extracted values mapped to reasonable ranges for physics stability
-
-### Car Construction
-- Cars are built procedurally from translated DNA using RigidBody2D nodes
-- Frame parts connected in sequence determined by DNA translation
-- Wheels attached at positions where DNA translates to `W` components
-- Power distribution calculated from DNA-derived parameters and powertrain complexity
-- Each car needs unique collision layer assignment for non-interfering racing
-
-### Evolution Parameters
-- Population size typically 20-30 cars with varied DNA string lengths
-- DNA target length affects car complexity (longer = more parts)
-- Simulation time limited to 15 seconds per race
-- Fitness based on distance traveled with survival bonus
-- Character mutation rates should be carefully balanced (15% replace, 5% remove, 10% insert)
-- Elite selection preserves top-performing DNA strings
-
-### Performance Considerations
-- Limit concurrent physics simulations
-- Use efficient collision detection
-- Clean up resources between generations
-- Monitor memory usage with large populations
-
-## File Patterns
-
-### Scene Structure
-- Main scenes: MainMenu, GameManager, TestDrive
-- Car construction happens dynamically in CarSimulation
-- UI elements should be responsive and informative
-
-### Legacy Code Reference
-- The `old_code/` directory contains Python implementation with extensive tests
-- Use as reference for genetic algorithm logic and edge case handling
-- Test files show important bug fixes and physics edge cases
+## File & Scene Conventions
+- Scenes:
+  - `scenes/MainMenu.tscn` + `scenes/MainMenu.gd`
+  - `scenes/Main.tscn` + `scenes/Main.gd`
+  - `scenes/TestDrive.tscn` + `scenes/TestDrive.gd`
+  - `scenes/GameManager.tscn` + `scenes/GameManager.gd`
+- Scripts:
+  - `scripts/CarDNA.gd`, `scripts/Car.gd`, `scripts/CarSimulation.gd`, `scripts/PopulationManager.gd`, `scripts/population.gd`
+- Legacy reference: `old_code/vroomon/` (Python implementation + tests for edge cases)
 
 ## Common Tasks
+- Add DNA translation rules:
+  1) Extend `_char_to_frame_part` / `_char_to_powertrain_part` in `CarDNA.gd`
+  2) Add new parameter extractors (e.g., suspension stiffness)
+  3) Use new parameters in `CarSimulation.build_car_from_dna`
+  4) Test with diverse DNA strings
+- Modify genetics:
+  - Adjust `Car.mutate()` and crossover strategy
+  - Consider length distribution effects and maintain validity
+- Tweak evolution parameters in `PopulationManager.gd` (sizes, rates, generations, retain ratio)
+- Update terrain in `CarSimulation._add_terrain_obstacles()`
 
-### Adding New DNA Translation Rules
-1. Extend character mapping in `CarDNA._char_to_frame_part()` or `_char_to_powertrain_part()`
-2. Add new parameter extraction functions (e.g., `get_suspension_stiffness(position: int)`)
-3. Update car construction logic in `CarSimulation.build_car_from_dna()`
-4. Test with various DNA strings to ensure robust behavior across character ranges
+## Scoring
+- Score = forward distance + small survival bonus; strong penalty if car falls.
+- Sort results descending; keep top performers (elitism) into next generation.
 
-### Modifying String-Based Genetics
-- Adjust character mutation rates in `Car.mutate()` for different evolution dynamics
-- Modify crossover methods in `Car.reproduce()` (single-point vs chunk-based)
-- Consider impact on DNA string length distribution in population
-- Test genetic operations with edge cases (very short/long strings)
+## Performance
+- Limit concurrent physics load; clean up bodies every generation.
+- Efficient collision: each car on unique layer; mask collides only with ground.
+- Monitor memory when increasing population.
 
-### DNA String Examples
-```gdscript
-# Simple car
-var dna = CarDNA.new("ABC123")
-var translated = dna.translate_to_frame_and_powertrain()
-# Result: {"frame": ["W", "R", "W"], "powertrain": ["C", "D", "G"]}
+## Backward Compatibility
+- New format: `{ "dna_string": "alphanumeric" }`
+- Old format still accepted: `{ "frame": [..], "powertrain": [..] }`
+- Prefer new format in all new code and serialization.
 
-# Testing specific parameters
-var wheel_size = dna.get_wheel_size(0)  # Size for first wheel
-var power_factor = dna.get_power_factor(1)  # Power factor for second position
+## Common Pitfalls & Gotchas
+- Resource paths: always include `res://scripts/` or `res://scenes/` prefixes when loading.
+- Collision layers: layer indices map to bitmasks; ensure cars don’t collide with each other (mask should include only layer 1).
+- DNA validation: avoid excluding valid alphanumerics; ensure min length 3.
+- Determinism: translation should always yield the same parts for the same DNA.
+- Cleanups: free car bodies and wheels on simulation end to avoid accumulation.
+
+## Workspace Structure (current)
 ```
-
-### Debug DNA Issues
-- Check DNA string validation in `CarDNA._validate_and_clean_dna()` (currently uses `is_valid_identifier()` and `is_valid_int()`)
-- Verify translation consistency by testing same DNA string multiple times
-- Monitor for edge cases in character-to-parameter mapping
-- Ensure DNA strings maintain valid characters after genetic operations
-- Note: Current validation may exclude some valid alphanumeric characters
-
-## Error Handling
-- Always validate DNA strings before car construction using `CarDNA._validate_and_clean_dna()`
-- Handle physics simulation edge cases with DNA-derived parameters
-- Provide meaningful error messages for invalid DNA string operations
-- Gracefully handle empty or corrupted DNA strings by generating fallback random DNA
-- Log DNA strings alongside error messages for debugging genetic operations
-
-## DNA String Migration Notes
-- System maintains compatibility with old `{"frame": [], "powertrain": []}` format
-- New DNA format: `{"dna_string": "alphanumeric_string"}`
-- Migration path: Convert old arrays to representative DNA strings if needed
-- All new population generation uses alphanumeric DNA string format
-
-## Current Project Structure
-```
-/home/calvin/vroomon/
+/home/calvin/code/vroomon/
 ├── project.godot
 ├── README.md
 ├── assets/
-│   ├── icon.svg
-│   └── icon.svg.import
 ├── scenes/
 │   ├── GameManager.gd & GameManager.tscn
 │   ├── Main.gd & Main.tscn
@@ -161,13 +138,29 @@ var power_factor = dna.get_power_factor(1)  # Power factor for second position
 │   ├── TestDrive.gd & TestDrive.tscn
 │   └── root.tscn
 ├── scripts/
-│   ├── Car.gd & Car.gd.uid
-│   ├── CarDNA.gd & CarDNA.gd.uid
-│   ├── CarSimulation.gd & CarSimulation.gd.uid
-│   ├── PopulationManager.gd & PopulationManager.gd.uid
-│   └── population.gd & population.gd.uid
+│   ├── Car.gd
+│   ├── CarDNA.gd
+│   ├── CarSimulation.gd
+│   ├── PopulationManager.gd
+│   └── population.gd
 └── old_code/
-    └── vroomon/ (Python reference implementation)
+    └── vroomon/ (Python reference implementation + tests)
 ```
 
-When working on this project, prioritize genetic algorithm correctness with string-based DNA, physics stability with DNA-derived parameters, and maintainable code structure that supports both DNA formats.
+## Quick Examples
+```gdscript
+# Translate DNA
+var dna = CarDNA.new("ABC123")
+var translated = dna.translate_to_frame_and_powertrain()
+# {"frame": ["W","R","W"], "powertrain": ["C","D","G"]}
+
+# Mutation
+var car = Car.new(dna)
+var mutated = car.mutate()
+
+# Build & simulate (via PopulationManager)
+var pm = PopulationManager.new()
+pm.start_evolution()
+```
+
+Priorities: maintain GA correctness with string DNA, physics stability via DNA-derived parameters, clean and maintainable code, and dual DNA format support.
