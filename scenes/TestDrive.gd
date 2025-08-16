@@ -101,6 +101,9 @@ func setup_simulation():
 	# Default area preset for test drive
 	if simulation_scene.has_method("set_area_config"):
 		simulation_scene.set_area_config(AreaConfigs.get_preset("Grassland"))
+	# Ensure motors/visuals update in preview mode
+	if simulation_scene.has_method("enable_motor_preview"):
+		simulation_scene.enable_motor_preview(true)
 
 func setup_camera():
 	camera = Camera2D.new()
@@ -146,7 +149,7 @@ func _process(delta):
 	# Update camera to follow car if it exists
 	if current_car and is_instance_valid(current_car):
 		# Smoothly follow the car
-		var target_pos = current_car.position
+		var target_pos: Vector2 = current_car.position
 		camera.position = camera.position.lerp(target_pos, delta * 2.0)
 
 func reset_car():
@@ -174,13 +177,13 @@ func _on_back_pressed():
 	# Return to main menu
 	get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
 
-func _input(event):
+func _input(event: InputEvent):
 	if not camera:
 		return
 
 	# Camera controls
-	var camera_speed = 300.0 / camera.zoom.x
-	var zoom_speed = 0.15
+	var camera_speed: float = 300.0 / camera.zoom.x
+	var zoom_speed: float = 0.15
 
 	if event.is_action_pressed("ui_left"):
 		camera.position.x -= camera_speed

@@ -78,3 +78,14 @@
 - Economy counter updates after each generation
 - No car-to-car collisions; consistent scoring; no resource path errors
 
+---
+
+## Follow-ups (Tech Debt / Refactors)
+
+- Move car-building responsibilities into `Car` class (DONE)
+- Update `PopulationManager` to pass `Car` objects instead of raw dicts
+- Add unit-friendly builder methods on `Car` for tests (e.g., `build_simple()`)
+- Consolidate collision-layer assignment logic in one helper
+- Consider translating DNA to discourage consecutive wheels without frames
+- Persist wallet/garage via `ConfigFile` or JSON
+

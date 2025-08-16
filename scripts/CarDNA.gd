@@ -18,10 +18,10 @@ func _generate_random_dna(length: int = -1) -> String:
 	var target_length = length if length > 0 else randi_range(8, 20)
 	var chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 	var result = ""
-	
+
 	for i in range(target_length):
 		result += chars[randi() % chars.length()]
-	
+
 	return result
 
 func _validate_and_clean_dna(dna: String) -> String:
@@ -31,11 +31,11 @@ func _validate_and_clean_dna(dna: String) -> String:
 		var character = dna[i]
 		if character.is_valid_identifier() or character.is_valid_int():
 			cleaned += character
-	
+
 	# Ensure minimum length
 	if cleaned.length() < 3:
 		cleaned += _generate_random_dna(3 - cleaned.length())
-	
+
 	return cleaned
 
 func to_dict() -> Dictionary:
@@ -58,29 +58,29 @@ func translate_to_frame_and_powertrain() -> Dictionary:
 	"""Convert the DNA string into frame and powertrain sequences"""
 	var frame_parts = []
 	var powertrain_parts = []
-	
+
 	# Use DNA string to determine car structure
 	var car_length = max(3, min(12, (dna_string.length() % 10) + 3))
-	
+
 	for i in range(car_length):
 		# Use different parts of DNA string for frame and powertrain
 		var frame_char = dna_string[i % dna_string.length()]
 		var powertrain_char = dna_string[(i + int(dna_string.length() / 2.0)) % dna_string.length()]
-		
+
 		# Translate frame character to part type
 		var frame_part = _char_to_frame_part(frame_char)
 		frame_parts.append(frame_part)
-		
+
 		# Translate powertrain character to part type
 		var powertrain_part = _char_to_powertrain_part(powertrain_char)
 		powertrain_parts.append(powertrain_part)
-	
+
 	return {"frame": frame_parts, "powertrain": powertrain_parts}
 
 func _char_to_frame_part(character: String) -> String:
 	"""Convert a single character to a frame part type"""
 	var ascii_val = character.unicode_at(0)
-	
+
 	# Simple mapping based on character value
 	if ascii_val % 2 == 0:
 		return "R"  # Rectangle chassis
@@ -90,7 +90,7 @@ func _char_to_frame_part(character: String) -> String:
 func _char_to_powertrain_part(character: String) -> String:
 	"""Convert a single character to a powertrain part type"""
 	var ascii_val = character.unicode_at(0)
-	
+
 	# Map to three powertrain types
 	match ascii_val % 3:
 		0:
