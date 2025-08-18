@@ -217,8 +217,9 @@ func _add_rectangle_to_chassis(chassis: RigidBody2D, offset: Vector2, car_index:
 
 	# Visual
 	var visual := ColorRect.new()
-	visual.size = Vector2(45, 25)
-	visual.position = offset - Vector2(22.5, 12.5)
+	visual.size = rect_shape.size
+	# Center the visual on the collision shape; collision already positioned at `offset`
+	visual.position = Vector2(-rect_shape.size.x / 2.0, -rect_shape.size.y / 2.0)
 	visual.color = Color.from_hsv(float(car_index) / 20.0, 0.6, 0.8)
 	collision.add_child(visual)
 
