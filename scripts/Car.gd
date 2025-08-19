@@ -6,6 +6,8 @@ extends RefCounted
 
 var dna: CarDNA
 var score: float = 0.0
+var _rect_bodies: Array[RigidBody2D] = []
+var _connectors: Array = []  # each: {a: RigidBody2D, b: RigidBody2D, theta_star: float, k: float, c: float, slack: float, tau_cap: float}
 
 func _init(car_dna: CarDNA = null):
 	if car_dna:
@@ -120,119 +122,147 @@ func get_dna_string() -> String:
 
 func build_in(parent: Node2D, car_index: int, dna_dict: Dictionary) -> RigidBody2D:
 	"""Build this car's scene (chassis, wheels, joints) under `parent` and return the chassis body.
-	Handles both new dna_string format and old frame/powertrain dicts."""
+	Uses DNA v2 translation for modules and parameters."""
 	# Stable parent for this car
-	var car_root := Node2D.new()
+	var car_root: Node2D = Node2D.new()
 	car_root.name = "Car_%d" % car_index
 	car_root.add_to_group("car")
 	parent.add_child(car_root)
 
-	# Chassis
-	var chassis := RigidBody2D.new()
-	chassis.position = Vector2(50, 150 - car_index * 30)
-	chassis.mass = 10.0
-	chassis.gravity_scale = 1.0
-	chassis.name = "Chassis"
-	chassis.can_sleep = false
-	chassis.linear_damp = 0.1
-	chassis.angular_damp = 0.2
-
 	# Unique collision layer per car; only collide with ground (layer 1)
 	var car_layer: int = 2 + (car_index % 29)
-	chassis.collision_layer = 1 << car_layer
-	chassis.collision_mask = 1
 
-	# Determine parts from DNA
-	var frame_parts: Array = []
-	var powertrain_parts: Array = []
-	var use_new_dna: bool = false
+	# Determine parts from DNA v2
 	if dna_dict.has("dna_string"):
-		use_new_dna = true
-		# Ensure our Car.dna matches provided dict
 		dna = CarDNA.new()
 		dna.from_dict(dna_dict)
-		var translated = dna.translate_to_frame_and_powertrain()
-		frame_parts = translated.frame
-		powertrain_parts = translated.powertrain
 	else:
-		# Old format compatibility
-		frame_parts = dna_dict.get("frame", [])
-		powertrain_parts = dna_dict.get("powertrain", [])
+		# Construct from provided dict fallback (rare); treat as string directly if present
+		dna = CarDNA.new(str(dna_dict.get("dna", "")))
 
-	if frame_parts.size() == 0:
-		push_error("Car has no frame parts - DNA: " + str(dna_dict))
+	var v2: Dictionary = dna.translate_v2()
+	var modules: Array = v2.get("modules", []) as Array
+	var positions: Array = v2.get("positions", []) as Array
+	var rect_params_list: Array = v2.get("rect_params", []) as Array
+	var wheel_params_list: Array = v2.get("wheel_params", []) as Array
+	# connectors from DNA are not directly used here; we compute adjacency ourselves
+	var _globals: Dictionary = v2.get("globals", {}) as Dictionary
+
+	if modules.is_empty():
+		push_error("Car has no modules - DNA: " + str(dna_dict))
 		return null
 
-	# Attach chassis under stable root
-	car_root.add_child(chassis)
+	_rect_bodies.clear()
+	self._connectors.clear()
 
-	# Spacing and anchors
-	var spacing := 50
-	var anchor_positions: Array = []
+	# Build rectangle bodies
+	var base_pos: Vector2 = Vector2(50, 150 - car_index * 30)
+	var rect_index_by_module: Dictionary = {}
+	for i in range(modules.size()):
+		if modules[i] == "R":
+			var rparams: Dictionary = rect_params_list[i] if i < rect_params_list.size() else {}
+			var w: float = float(rparams.get("width", 45.0))
+			var h: float = float(rparams.get("height", 25.0))
+			var density: float = float(rparams.get("density", 1.0))
+			var x_local: float = float(positions[i]) - float(positions[0]) if positions.size() > 0 else 0.0
+			var body: RigidBody2D = _create_rectangle_body(car_root, base_pos + Vector2(x_local, 0), Vector2(w, h), car_index, car_layer, density)
+			_rect_bodies.append(body)
+			rect_index_by_module[i] = _rect_bodies.size() - 1
 
-	# First pass: rectangles advance x
-	var x_offset := 0
-	for i in range(frame_parts.size()):
-		var frame_code: String = str(frame_parts[i])
-		if frame_code == "R":
-			_add_rectangle_to_chassis(chassis, Vector2(x_offset, 0), car_index, car_layer)
-			anchor_positions.append(x_offset)
-			x_offset += spacing
-		# Wheels do not advance x_offset
+	# Ensure at least one rectangle exists
+	if _rect_bodies.is_empty():
+		var body: RigidBody2D = _create_rectangle_body(car_root, base_pos, Vector2(45, 25), car_index, car_layer, 1.0)
+		_rect_bodies.append(body)
+		rect_index_by_module[0] = 0
 
-	# Ensure at least one rectangle anchor
-	if anchor_positions.is_empty():
-		_add_rectangle_to_chassis(chassis, Vector2(0, 0), car_index, car_layer)
-		anchor_positions.append(0)
-
-	# Second pass: attach wheels near nearest prior rectangle
-	var rect_progress: int = 0
-	for i in range(frame_parts.size()):
-		var frame_code: String = str(frame_parts[i])
-		if frame_code == "R":
-			rect_progress += 1
+	# Attach wheels to nearest prior rectangle
+	var last_rect_body: RigidBody2D = null
+	for i in range(modules.size()):
+		if modules[i] == "R":
+			# Update last_rect_body to this module's rectangle
+			if rect_index_by_module.has(i):
+				last_rect_body = _rect_bodies[int(rect_index_by_module[i])]
 			continue
-		elif frame_code == "W":
-			var anchor_index: int = max(0, rect_progress - 1)
-			anchor_index = min(anchor_index, anchor_positions.size() - 1)
-			var anchor_x: int = int(anchor_positions[anchor_index])
-			var wheel_dna: CarDNA = dna if use_new_dna else null
-			var wheel_power: float = _calculate_wheel_power(powertrain_parts, i, wheel_dna, i)
-			var wheel_size: Vector2 = _get_wheel_size(i, use_new_dna)
-			_add_connected_wheel(chassis, Vector2(anchor_x, 35), wheel_power, car_index, car_layer, wheel_size)
+		elif modules[i] == "W":
+			if last_rect_body:
+				var wparams: Dictionary = wheel_params_list[i] if i < wheel_params_list.size() else {}
+				var radius: float = float(wparams.get("radius", 18.0))
+				var motor_power: float = float(wparams.get("motor_power", 90.0))
+				var friction: float = float(wparams.get("friction", 1.0))
+				var wheel_size: Vector2 = Vector2(radius * 2.0, radius * 2.0)
+				_add_connected_wheel(last_rect_body, Vector2(0, 35), motor_power, car_index, car_layer, wheel_size, friction)
 
-	# Visual variety
-	chassis.modulate = Color.from_hsv(float(car_index) / 20.0, 0.8, 1.0)
+	# Build rotational connectors between consecutive rectangles
+	for i in range(modules.size() - 1):
+		if modules[i] == "R" and modules[i + 1] == "R":
+			if rect_index_by_module.has(i) and rect_index_by_module.has(i + 1):
+				var a: RigidBody2D = _rect_bodies[int(rect_index_by_module[i])]
+				var b: RigidBody2D = _rect_bodies[int(rect_index_by_module[i + 1])]
+				# Place a PinJoint2D at midpoint
+				var joint: PinJoint2D = PinJoint2D.new()
+				joint.global_position = (a.global_position + b.global_position) / 2.0
+				car_root.add_child(joint)
+				joint.node_a = a.get_path()
+				joint.node_b = b.get_path()
+				# PD parameters from DNA
+				var cparams: Dictionary = dna.connector_params(i)
+				var target: float = deg_to_rad(float(cparams.get("angle_deg", 0.0)))
+				var k: float = float(cparams.get("stiffness_k", 0.8))
+				var d: float = float(cparams.get("damping_c", 0.4))
+				var slack: float = deg_to_rad(float(cparams.get("slack_deg", 2.0)))
+				var tau_cap: float = 200.0
+				self._connectors.append({
+					"a": a, "b": b, "theta_star": target, "k": k, "c": d, "slack": slack, "tau_cap": tau_cap
+				})
 
-	return chassis
+	# Choose primary body as the first rectangle
+	var primary: RigidBody2D = _rect_bodies[0]
+	# Visual variety: tint rectangle visuals
+	primary.modulate = Color.from_hsv(float(car_index) / 20.0, 0.8, 1.0)
+	return primary
 
-func _add_rectangle_to_chassis(chassis: RigidBody2D, offset: Vector2, car_index: int, _car_layer: int) -> void:
-	var rect_shape := RectangleShape2D.new()
-	rect_shape.size = Vector2(45, 25)
+func _create_rectangle_body(root: Node2D, global_pos: Vector2, size: Vector2, car_index: int, car_layer: int, density: float) -> RigidBody2D:
+	var body: RigidBody2D = RigidBody2D.new()
+	body.position = global_pos
+	body.gravity_scale = 1.0
+	body.name = "Rect_" + str(car_index) + "_" + str(_rect_bodies.size())
+	body.can_sleep = false
+	body.linear_damp = 0.1
+	body.angular_damp = 0.2
+	# Collision settings: this car's unique layer, collide only with ground (layer 1)
+	body.collision_layer = 1 << car_layer
+	body.collision_mask = 1
 
-	var collision := CollisionShape2D.new()
+	var rect_shape: RectangleShape2D = RectangleShape2D.new()
+	rect_shape.size = size
+	var collision: CollisionShape2D = CollisionShape2D.new()
 	collision.shape = rect_shape
-	collision.position = offset
-	chassis.add_child(collision)
+	body.add_child(collision)
 
 	# Visual
-	var visual := ColorRect.new()
+	var visual: ColorRect = ColorRect.new()
 	visual.size = rect_shape.size
-	# Center the visual on the collision shape; collision already positioned at `offset`
 	visual.position = Vector2(-rect_shape.size.x / 2.0, -rect_shape.size.y / 2.0)
 	visual.color = Color.from_hsv(float(car_index) / 20.0, 0.6, 0.8)
 	collision.add_child(visual)
 
+	# Mass from area * density (scaled)
+	var area: float = max(1.0, size.x * size.y)
+	body.mass = clamp((area * density) / 200.0, 2.0, 80.0)
+
+	root.add_child(body)
+	return body
+
 func _get_wheel_size(wheel_pos: int, use_new_dna: bool) -> Vector2:
 	# Get wheel size from DNA string, fallback to default if old format
 	if use_new_dna and dna:
-		var size := dna.get_wheel_size(wheel_pos)
+		var size: float = dna.get_wheel_size(wheel_pos)
 		return Vector2(size, size)
 	return Vector2(36, 36)
 
-func _add_connected_wheel(chassis: RigidBody2D, offset: Vector2, power: float, car_index: int, car_layer: int, wheel_size: Vector2 = Vector2(36, 36)) -> RigidBody2D:
-	var wheel_body := RigidBody2D.new()
-	wheel_body.position = chassis.position + offset
+func _add_connected_wheel(host: RigidBody2D, offset: Vector2, power: float, car_index: int, car_layer: int, wheel_size: Vector2 = Vector2(36, 36), friction: float = 1.0) -> RigidBody2D:
+	var wheel_body: RigidBody2D = RigidBody2D.new()
+	wheel_body.position = host.position + offset
 	wheel_body.mass = 3.0
 	wheel_body.gravity_scale = 1.0
 	wheel_body.name = "Wheel_" + str(car_index)
@@ -244,48 +274,52 @@ func _add_connected_wheel(chassis: RigidBody2D, offset: Vector2, power: float, c
 	wheel_body.collision_layer = 1 << car_layer
 	wheel_body.collision_mask = 1
 
-	var circle_shape := CircleShape2D.new()
+	var circle_shape: CircleShape2D = CircleShape2D.new()
 	circle_shape.radius = wheel_size.x / 2
 
-	var collision := CollisionShape2D.new()
+	var collision: CollisionShape2D = CollisionShape2D.new()
 	collision.shape = circle_shape
+	# Apply wheel friction via physics material
+	var mat: PhysicsMaterial = PhysicsMaterial.new()
+	mat.friction = friction
+	wheel_body.physics_material_override = mat
 	wheel_body.add_child(collision)
 
 	# Visuals container that rotates with the wheel
-	var visual := Node2D.new()
+	var visual: Node2D = Node2D.new()
 	visual.name = "Visual"
 	visual.z_index = 20
 	wheel_body.add_child(visual)
 
 	# Draw a filled circle and a spoke for rotation perception
-	var color := Color.from_hsv(float(car_index) / 20.0, 1.0, 0.9)
-	var poly := Polygon2D.new()
+	var color: Color = Color.from_hsv(float(car_index) / 20.0, 1.0, 0.9)
+	var poly: Polygon2D = Polygon2D.new()
 	poly.polygon = _make_circle_points(circle_shape.radius, 24)
 	poly.color = color
 	visual.add_child(poly)
 
-	var spoke := Line2D.new()
+	var spoke: Line2D = Line2D.new()
 	spoke.width = 2.0
 	spoke.default_color = Color.BLACK
 	spoke.points = PackedVector2Array([Vector2.ZERO, Vector2(circle_shape.radius, 0)])
 	visual.add_child(spoke)
 
 	# Add wheel to same root as chassis
-	var root := chassis.get_parent()
+	var root: Node = host.get_parent()
 	if root:
 		root.add_child(wheel_body)
 	else:
 		# Fallback; should not happen when using build_in
-		wheel_body.owner = chassis.owner
+		wheel_body.owner = host.owner
 
 	# Create pin joint under the stable root now that both are in the tree
-	var joint := PinJoint2D.new()
+	var joint: PinJoint2D = PinJoint2D.new()
 	joint.global_position = wheel_body.global_position  # rotate about wheel center
 	if root:
 		root.add_child(joint)
 	else:
-		chassis.add_child(joint)
-	joint.node_a = chassis.get_path()
+		host.add_child(joint)
+	joint.node_a = host.get_path()
 	joint.node_b = wheel_body.get_path()
 
 	# Store wheel power and radius for motor application
@@ -356,3 +390,31 @@ func update_wheels(car_root: Node, preview: bool = false) -> void:
 				var torque_scale: float = 2.0 * float(max(12.0, radius)) / 18.0
 				var torque: float = float(max(5.0, power)) * torque_scale
 				node.apply_torque_impulse(torque)
+
+func update_connectors(delta: float) -> void:
+	# Apply PD torque on rectangle connectors to approach target relative angle
+	for c in _connectors:
+		var a: RigidBody2D = c.a
+		var b: RigidBody2D = c.b
+		if not is_instance_valid(a) or not is_instance_valid(b):
+			continue
+		var theta_star: float = c.theta_star
+		var k: float = c.k
+		var d: float = c.c
+		var slack: float = c.slack
+		var cap: float = c.tau_cap
+		var theta: float = wrapf(b.rotation - a.rotation, -PI, PI)
+		var err: float = theta_star - theta
+		# slack dead-zone
+		if abs(err) < slack:
+			continue
+		if err > 0:
+			err -= slack
+		else:
+			err += slack
+		var omega_rel: float = b.angular_velocity - a.angular_velocity
+		var tau: float = k * err - d * omega_rel
+		tau = clamp(tau, -cap, cap)
+		# equal and opposite torques
+		b.apply_torque(tau)
+		a.apply_torque(-tau)

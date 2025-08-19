@@ -164,3 +164,10 @@ pm.start_evolution()
 ```
 
 Priorities: maintain GA correctness with string DNA, physics stability via DNA-derived parameters, clean and maintainable code, and dual DNA format support.
+
+## Useful Godot docs
+- GDScript basics: https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_basics.html
+- @GDScript built-ins (globals, math constants): https://docs.godotengine.org/en/stable/classes/class_@gdscript.html
+- GlobalScope functions (math helpers): https://docs.godotengine.org/en/stable/classes/class_@globalscope.html
+- Class reference index: https://docs.godotengine.org/en/stable/classes/index.html
+- 2D physics overview: https://docs.godotengine.org/en/stable/tutorials/physics/physics_introduction_2d.html

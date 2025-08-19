@@ -179,6 +179,8 @@ func _physics_process(delta):
 		if entry.has("car") and is_instance_valid(entry.root):
 			var preview := not is_simulating and motor_preview_always_on
 			entry.car.update_wheels(entry.root, preview)
+			# Drive flexible connectors (always on during physics)
+			entry.car.update_connectors(delta)
 
 	# End simulation after time limit only in full sim mode
 	if is_simulating and simulation_timer >= SIMULATION_TIME:
