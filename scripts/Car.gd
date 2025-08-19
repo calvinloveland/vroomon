@@ -7,7 +7,10 @@ extends RefCounted
 var dna: CarDNA
 var score: float = 0.0
 var _rect_bodies: Array[RigidBody2D] = []
-var _connectors: Array = []  # each: {a: RigidBody2D, b: RigidBody2D, theta_star: float, k: float, c: float, slack: float, tau_cap: float}
+var _connectors: Array = []  # each: {a: RigidBody2D, b: RigidBody2D, theta_star: float, dbg: Line2D}
+var _root: Node2D
+var _debug_log_cooldown: float = 0.0
+var _debug_connectors: bool = true
 
 func _init(car_dna: CarDNA = null):
 	if car_dna:
@@ -128,6 +131,7 @@ func build_in(parent: Node2D, car_index: int, dna_dict: Dictionary) -> RigidBody
 	car_root.name = "Car_%d" % car_index
 	car_root.add_to_group("car")
 	parent.add_child(car_root)
+	_root = car_root
 
 	# Unique collision layer per car; only collide with ground (layer 1)
 	var car_layer: int = 2 + (car_index % 29)
@@ -145,6 +149,7 @@ func build_in(parent: Node2D, car_index: int, dna_dict: Dictionary) -> RigidBody
 	var positions: Array = v2.get("positions", []) as Array
 	var rect_params_list: Array = v2.get("rect_params", []) as Array
 	var wheel_params_list: Array = v2.get("wheel_params", []) as Array
+	var connectors_list: Array = v2.get("connectors", []) as Array
 	# connectors from DNA are not directly used here; we compute adjacency ourselves
 	var _globals: Dictionary = v2.get("globals", {}) as Dictionary
 
@@ -158,6 +163,7 @@ func build_in(parent: Node2D, car_index: int, dna_dict: Dictionary) -> RigidBody
 	# Build rectangle bodies
 	var base_pos: Vector2 = Vector2(50, 150 - car_index * 30)
 	var rect_index_by_module: Dictionary = {}
+	var rect_module_indices: Array = []
 	for i in range(modules.size()):
 		if modules[i] == "R":
 			var rparams: Dictionary = rect_params_list[i] if i < rect_params_list.size() else {}
@@ -168,14 +174,42 @@ func build_in(parent: Node2D, car_index: int, dna_dict: Dictionary) -> RigidBody
 			var body: RigidBody2D = _create_rectangle_body(car_root, base_pos + Vector2(x_local, 0), Vector2(w, h), car_index, car_layer, density)
 			_rect_bodies.append(body)
 			rect_index_by_module[i] = _rect_bodies.size() - 1
+			rect_module_indices.append(i)
 
 	# Ensure at least one rectangle exists
 	if _rect_bodies.is_empty():
 		var body: RigidBody2D = _create_rectangle_body(car_root, base_pos, Vector2(45, 25), car_index, car_layer, 1.0)
 		_rect_bodies.append(body)
 		rect_index_by_module[0] = 0
+		if rect_module_indices.is_empty():
+			rect_module_indices.append(0)
 
-	# Attach wheels to nearest prior rectangle
+	# Reposition and orient rectangles based on cumulative angles from DNA
+	if _rect_bodies.size() >= 1 and rect_module_indices.size() == _rect_bodies.size():
+		# Optional: build angle lookup from connectors_list (module indices)
+		var angle_map: Dictionary = {}
+		for c in connectors_list:
+			if c is Dictionary and c.has("i") and c.has("j"):
+				var ai: int = int(c["i"])  # module index
+				var aj: int = int(c["j"])  # module index
+				var ang_rad: float = deg_to_rad(float(c.get("angle_deg", 0.0)))
+				angle_map["%d-%d" % [ai, aj]] = ang_rad
+		var pos_acc: Vector2 = Vector2.ZERO
+		var cum_angle: float = 0.0
+		_rect_bodies[0].position = base_pos + pos_acc
+		_rect_bodies[0].rotation = cum_angle
+		for ridx in range(1, _rect_bodies.size()):
+			var prev_mod: int = int(rect_module_indices[ridx - 1])
+			var cur_mod: int = int(rect_module_indices[ridx])
+			var key: String = "%d-%d" % [prev_mod, cur_mod]
+			var ang: float = angle_map.get(key, deg_to_rad(float(dna.connector_params(prev_mod).get("angle_deg", 0.0))))
+			var dx: float = float(positions[cur_mod]) - float(positions[prev_mod])
+			pos_acc += Vector2(dx, 0).rotated(cum_angle)
+			cum_angle += float(ang)
+			_rect_bodies[ridx].position = base_pos + pos_acc
+			_rect_bodies[ridx].rotation = cum_angle
+
+	# Attach wheels to nearest prior rectangle (rotate wheel offset by host rotation)
 	var last_rect_body: RigidBody2D = null
 	for i in range(modules.size()):
 		if modules[i] == "R":
@@ -190,56 +224,58 @@ func build_in(parent: Node2D, car_index: int, dna_dict: Dictionary) -> RigidBody
 				var motor_power: float = float(wparams.get("motor_power", 90.0))
 				var friction: float = float(wparams.get("friction", 1.0))
 				var wheel_size: Vector2 = Vector2(radius * 2.0, radius * 2.0)
-				_add_connected_wheel(last_rect_body, Vector2(0, 35), motor_power, car_index, car_layer, wheel_size, friction)
+				var wheel_offset: Vector2 = Vector2(0, 35).rotated(last_rect_body.rotation)
+				_add_connected_wheel(last_rect_body, wheel_offset, motor_power, car_index, car_layer, wheel_size, friction)
 
-	# Build rotational connectors by chaining rectangles in encounter order (ignoring wheels)
+	# Build rotational connectors by chaining rectangles using a central pin and dual springs
 	if _rect_bodies.size() >= 2:
 		for r in range(_rect_bodies.size() - 1):
 			var a: RigidBody2D = _rect_bodies[r]
 			var b: RigidBody2D = _rect_bodies[r + 1]
-			# Place two PinJoint2D anchors to strongly couple positions (approximate a weld)
+			# Single PinJoint2D at the midpoint to keep adjacency
 			var mid: Vector2 = (a.global_position + b.global_position) / 2.0
-			var dir: Vector2 = b.global_position - a.global_position
-			var dist: float = dir.length()
-			if dist > 0.001:
-				dir /= dist
-			else:
-				dir = Vector2.RIGHT
+			var pin: PinJoint2D = PinJoint2D.new()
+			pin.global_position = mid
+			car_root.add_child(pin)
+			pin.node_a = a.get_path()
+			pin.node_b = b.get_path()
+			# DNA parameters for target angle and spring strength
+			var prev_mod: int = int(rect_module_indices[r])
+			var cparams: Dictionary = dna.connector_params(prev_mod)
+			var target: float = deg_to_rad(float(cparams.get("angle_deg", 0.0)))
+			# Geometry for dual springs placed above and below the link line
+			var ab_vec: Vector2 = b.global_position - a.global_position
+			var dist: float = max(1.0, ab_vec.length())
+			var dir: Vector2 = ab_vec / dist
 			var perp: Vector2 = Vector2(-dir.y, dir.x)
 			var size_a: Vector2 = a.get_meta("rect_size", Vector2(45, 25))
 			var size_b: Vector2 = b.get_meta("rect_size", Vector2(45, 25))
 			var spread: float = min(size_a.y, size_b.y) * 0.45
-			var anchor1: Vector2 = mid + perp * spread
-			var anchor2: Vector2 = mid - perp * spread
-
-			var joint1: PinJoint2D = PinJoint2D.new()
-			joint1.global_position = anchor1
-			car_root.add_child(joint1)
-			joint1.node_a = a.get_path()
-			joint1.node_b = b.get_path()
-
-			var joint2: PinJoint2D = PinJoint2D.new()
-			joint2.global_position = anchor2
-			car_root.add_child(joint2)
-			joint2.node_a = a.get_path()
-			joint2.node_b = b.get_path()
-			# PD parameters from DNA (use the corresponding module index if available, fallback to r)
-			var idx_for_params: int = r
-			var cparams: Dictionary = dna.connector_params(idx_for_params)
-			var target: float = deg_to_rad(float(cparams.get("angle_deg", 0.0)))
-			# Much stronger base stiffness/damping and higher caps; scale by mass/inertia
-			var base_k: float = float(cparams.get("stiffness_k", 0.8)) * 150.0
-			var base_d: float = float(cparams.get("damping_c", 0.4)) * 40.0
-			var avg_mass: float = 0.5 * (a.mass + b.mass)
-			var Ia: float = float(a.get_meta("inertia_est", a.mass * 2000.0))
-			var Ib: float = float(b.get_meta("inertia_est", b.mass * 2000.0))
-			var I_avg: float = max(1.0, 0.5 * (Ia + Ib))
-			var k_eff: float = base_k * (1.0 + avg_mass / 6.0)
-			var d_eff: float = base_d * (1.0 + avg_mass / 6.0)
-			var slack: float = min(deg_to_rad(float(cparams.get("slack_deg", 0.2))), deg_to_rad(0.1))
-			var tau_cap: float = clamp(60000.0 + 1200.0 * avg_mass + 0.08 * I_avg, 30000.0, 200000.0)
+			var a1_world: Vector2 = mid + perp * spread
+			var b1_world: Vector2 = mid + perp * spread
+			var a2_world: Vector2 = mid - perp * spread
+			var b2_world: Vector2 = mid - perp * spread
+			# Additional two PinJoint2D placed off-axis to create restoring moment
+			var pin1: PinJoint2D = PinJoint2D.new()
+			pin1.global_position = a1_world
+			car_root.add_child(pin1)
+			pin1.node_a = a.get_path()
+			pin1.node_b = b.get_path()
+			var pin2: PinJoint2D = PinJoint2D.new()
+			pin2.global_position = a2_world
+			car_root.add_child(pin2)
+			pin2.node_a = a.get_path()
+			pin2.node_b = b.get_path()
+			# Debug line for visualization
+			var dbg_line: Line2D = null
+			if _debug_connectors:
+				dbg_line = Line2D.new()
+				dbg_line.width = 2.0
+				dbg_line.default_color = Color(0, 1, 0, 0.8)
+				dbg_line.z_index = 100
+				car_root.add_child(dbg_line)
 			self._connectors.append({
-				"a": a, "b": b, "theta_star": target, "k": k_eff, "c": d_eff, "slack": slack, "tau_cap": tau_cap
+				"a": a, "b": b, "theta_star": target, "dbg": dbg_line
 			})
 
 	# Choose primary body as the first rectangle
@@ -254,8 +290,8 @@ func _create_rectangle_body(root: Node2D, global_pos: Vector2, size: Vector2, ca
 	body.gravity_scale = 1.0
 	body.name = "Rect_" + str(car_index) + "_" + str(_rect_bodies.size())
 	body.can_sleep = false
-	body.linear_damp = 0.1
-	body.angular_damp = 0.2
+	body.linear_damp = 0.2
+	body.angular_damp = 0.5
 	# Collision settings: this car's unique layer, collide only with ground (layer 1)
 	body.collision_layer = 1 << car_layer
 	body.collision_mask = 1
@@ -424,34 +460,26 @@ func update_wheels(car_root: Node, preview: bool = false) -> void:
 				node.apply_torque_impulse(torque)
 
 func update_connectors(delta: float) -> void:
-	# Apply PD torque on rectangle connectors to approach target relative angle
-	for c in _connectors:
-		var a: RigidBody2D = c.a
-		var b: RigidBody2D = c.b
+	# Visualize connector state; springs provide the physics
+	for i in range(_connectors.size()):
+		var c = _connectors[i]
+		var a: RigidBody2D = c["a"]
+		var b: RigidBody2D = c["b"]
 		if not is_instance_valid(a) or not is_instance_valid(b):
 			continue
-		var theta_star: float = c.theta_star
-		var k: float = c.k
-		var d: float = c.c
-		var slack: float = c.slack
-		var cap: float = c.tau_cap
+		var theta_star: float = float(c["theta_star"])
 		var theta: float = wrapf(b.rotation - a.rotation, -PI, PI)
-		var err: float = theta_star - theta
-		# slack dead-zone
-		if abs(err) < slack:
-			continue
-		if err > 0:
-			err -= slack
-		else:
-			err += slack
-		var omega_rel: float = b.angular_velocity - a.angular_velocity
-		# Scale by estimated inertia and apply as impulse for stronger effect per-step
-		var Ia: float = float(a.get_meta("inertia_est", a.mass * 2000.0))
-		var Ib: float = float(b.get_meta("inertia_est", b.mass * 2000.0))
-		var I_avg: float = max(1.0, 0.5 * (Ia + Ib))
-		var tau: float = (k * err - d * omega_rel) * max(1.0, I_avg * 0.001)
-		tau = clamp(tau, -cap, cap)
-		var tau_imp: float = tau * delta
-		# equal and opposite torques
-		b.apply_torque_impulse(tau_imp)
-		a.apply_torque_impulse(-tau_imp)
+		var err: float = wrapf(theta_star - theta, -PI, PI)
+		if _debug_connectors and _root and c.get("dbg"):
+			var l: Line2D = c["dbg"]
+			l.points = PackedVector2Array([_root.to_local(a.global_position), _root.to_local(b.global_position)])
+			var eabs: float = abs(err)
+			var t: float = clamp(eabs / deg_to_rad(45.0), 0.0, 1.0)
+			# Green near target, fades to red as error grows
+			l.default_color = Color(0, 1, 0, 0.85).lerp(Color(1, 0, 0, 0.9), t)
+			l.width = 2.0 + 2.0 * t
+		if i == 0 and _debug_connectors and _debug_log_cooldown <= 0.0:
+			print("Connector[0] theta=", rad_to_deg(theta), "°, target=", rad_to_deg(theta_star), "°, err=", rad_to_deg(err))
+			_debug_log_cooldown = 0.5
+	if _debug_log_cooldown > 0.0:
+		_debug_log_cooldown -= delta
