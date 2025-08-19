@@ -192,28 +192,55 @@ func build_in(parent: Node2D, car_index: int, dna_dict: Dictionary) -> RigidBody
 				var wheel_size: Vector2 = Vector2(radius * 2.0, radius * 2.0)
 				_add_connected_wheel(last_rect_body, Vector2(0, 35), motor_power, car_index, car_layer, wheel_size, friction)
 
-	# Build rotational connectors between consecutive rectangles
-	for i in range(modules.size() - 1):
-		if modules[i] == "R" and modules[i + 1] == "R":
-			if rect_index_by_module.has(i) and rect_index_by_module.has(i + 1):
-				var a: RigidBody2D = _rect_bodies[int(rect_index_by_module[i])]
-				var b: RigidBody2D = _rect_bodies[int(rect_index_by_module[i + 1])]
-				# Place a PinJoint2D at midpoint
-				var joint: PinJoint2D = PinJoint2D.new()
-				joint.global_position = (a.global_position + b.global_position) / 2.0
-				car_root.add_child(joint)
-				joint.node_a = a.get_path()
-				joint.node_b = b.get_path()
-				# PD parameters from DNA
-				var cparams: Dictionary = dna.connector_params(i)
-				var target: float = deg_to_rad(float(cparams.get("angle_deg", 0.0)))
-				var k: float = float(cparams.get("stiffness_k", 0.8))
-				var d: float = float(cparams.get("damping_c", 0.4))
-				var slack: float = deg_to_rad(float(cparams.get("slack_deg", 2.0)))
-				var tau_cap: float = 200.0
-				self._connectors.append({
-					"a": a, "b": b, "theta_star": target, "k": k, "c": d, "slack": slack, "tau_cap": tau_cap
-				})
+	# Build rotational connectors by chaining rectangles in encounter order (ignoring wheels)
+	if _rect_bodies.size() >= 2:
+		for r in range(_rect_bodies.size() - 1):
+			var a: RigidBody2D = _rect_bodies[r]
+			var b: RigidBody2D = _rect_bodies[r + 1]
+			# Place two PinJoint2D anchors to strongly couple positions (approximate a weld)
+			var mid: Vector2 = (a.global_position + b.global_position) / 2.0
+			var dir: Vector2 = b.global_position - a.global_position
+			var dist: float = dir.length()
+			if dist > 0.001:
+				dir /= dist
+			else:
+				dir = Vector2.RIGHT
+			var perp: Vector2 = Vector2(-dir.y, dir.x)
+			var size_a: Vector2 = a.get_meta("rect_size", Vector2(45, 25))
+			var size_b: Vector2 = b.get_meta("rect_size", Vector2(45, 25))
+			var spread: float = min(size_a.y, size_b.y) * 0.45
+			var anchor1: Vector2 = mid + perp * spread
+			var anchor2: Vector2 = mid - perp * spread
+
+			var joint1: PinJoint2D = PinJoint2D.new()
+			joint1.global_position = anchor1
+			car_root.add_child(joint1)
+			joint1.node_a = a.get_path()
+			joint1.node_b = b.get_path()
+
+			var joint2: PinJoint2D = PinJoint2D.new()
+			joint2.global_position = anchor2
+			car_root.add_child(joint2)
+			joint2.node_a = a.get_path()
+			joint2.node_b = b.get_path()
+			# PD parameters from DNA (use the corresponding module index if available, fallback to r)
+			var idx_for_params: int = r
+			var cparams: Dictionary = dna.connector_params(idx_for_params)
+			var target: float = deg_to_rad(float(cparams.get("angle_deg", 0.0)))
+			# Much stronger base stiffness/damping and higher caps; scale by mass/inertia
+			var base_k: float = float(cparams.get("stiffness_k", 0.8)) * 150.0
+			var base_d: float = float(cparams.get("damping_c", 0.4)) * 40.0
+			var avg_mass: float = 0.5 * (a.mass + b.mass)
+			var Ia: float = float(a.get_meta("inertia_est", a.mass * 2000.0))
+			var Ib: float = float(b.get_meta("inertia_est", b.mass * 2000.0))
+			var I_avg: float = max(1.0, 0.5 * (Ia + Ib))
+			var k_eff: float = base_k * (1.0 + avg_mass / 6.0)
+			var d_eff: float = base_d * (1.0 + avg_mass / 6.0)
+			var slack: float = min(deg_to_rad(float(cparams.get("slack_deg", 0.2))), deg_to_rad(0.1))
+			var tau_cap: float = clamp(60000.0 + 1200.0 * avg_mass + 0.08 * I_avg, 30000.0, 200000.0)
+			self._connectors.append({
+				"a": a, "b": b, "theta_star": target, "k": k_eff, "c": d_eff, "slack": slack, "tau_cap": tau_cap
+			})
 
 	# Choose primary body as the first rectangle
 	var primary: RigidBody2D = _rect_bodies[0]
@@ -249,6 +276,11 @@ func _create_rectangle_body(root: Node2D, global_pos: Vector2, size: Vector2, ca
 	# Mass from area * density (scaled)
 	var area: float = max(1.0, size.x * size.y)
 	body.mass = clamp((area * density) / 200.0, 2.0, 80.0)
+
+	# Store geometry and inertia estimate for connector scaling
+	body.set_meta("rect_size", size)
+	var inertia_est: float = body.mass * (size.x * size.x + size.y * size.y) / 12.0
+	body.set_meta("inertia_est", inertia_est)
 
 	root.add_child(body)
 	return body
@@ -413,8 +445,13 @@ func update_connectors(delta: float) -> void:
 		else:
 			err += slack
 		var omega_rel: float = b.angular_velocity - a.angular_velocity
-		var tau: float = k * err - d * omega_rel
+		# Scale by estimated inertia and apply as impulse for stronger effect per-step
+		var Ia: float = float(a.get_meta("inertia_est", a.mass * 2000.0))
+		var Ib: float = float(b.get_meta("inertia_est", b.mass * 2000.0))
+		var I_avg: float = max(1.0, 0.5 * (Ia + Ib))
+		var tau: float = (k * err - d * omega_rel) * max(1.0, I_avg * 0.001)
 		tau = clamp(tau, -cap, cap)
+		var tau_imp: float = tau * delta
 		# equal and opposite torques
-		b.apply_torque(tau)
-		a.apply_torque(-tau)
+		b.apply_torque_impulse(tau_imp)
+		a.apply_torque_impulse(-tau_imp)
