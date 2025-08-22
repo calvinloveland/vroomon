@@ -15,6 +15,7 @@ extends Control
 
 var is_evolution_running: bool = false
 var wallet_label: Label
+var stats_panel: RichTextLabel
 
 func _ready():
 	setup_ui()
@@ -177,6 +178,23 @@ func setup_ui():
 
 	status_label = Label.new()
 	status_label.text = "Ready to start"
+	# Stats panel
+	var spacer_stats = Control.new()
+	spacer_stats.custom_minimum_size.y = 10
+	overlay_panel.add_child(spacer_stats)
+	var stats_title = Label.new()
+	stats_title.text = "Generation Stats"
+	stats_title.add_theme_font_size_override("font_size", 12)
+	stats_title.modulate = Color.WHITE
+	overlay_panel.add_child(stats_title)
+	stats_panel = RichTextLabel.new()
+	stats_panel.bbcode_enabled = true
+	stats_panel.scroll_active = true
+	stats_panel.scroll_following = true
+	stats_panel.fit_content = true
+	stats_panel.custom_minimum_size = Vector2(300, 160)
+	stats_panel.add_theme_color_override("default_color", Color(0.9, 0.9, 0.9))
+	overlay_panel.add_child(stats_panel)
 	status_label.add_theme_font_size_override("font_size", 11)
 	status_label.modulate = Color.LIGHT_GRAY
 	overlay_panel.add_child(status_label)
@@ -211,6 +229,7 @@ func setup_population_manager():
 
 	# Connect signals
 	population_manager.generation_completed.connect(_on_generation_completed)
+	population_manager.generation_stats.connect(_on_generation_stats)
 	population_manager.evolution_finished.connect(_on_evolution_finished)
 	# Initialize area preset
 	if population_manager.has_method("set_area_preset"):
@@ -338,11 +357,13 @@ func _on_dna_length_changed(value: float):
 		population_manager.dna_length = int(value)
 
 func _on_generation_completed(generation: int, best_score: float):
-	generation_label.text = "Generation: %d/%d" % [generation, population_manager.generations]
+	generation_label.text = "Generation: %d" % generation
 	best_score_label.text = "Best Score: %.1f" % best_score
 	if wallet_label:
 		wallet_label.text = "Wallet: $%d" % population_manager.wallet
-	progress_bar.value = generation
+	# In infinite mode, loop progress bar visually
+	progress_bar.max_value = 20
+	progress_bar.value = generation % int(progress_bar.max_value)
 	status_label.text = "Racing generation %d..." % generation
 
 	print("UI: Generation %d completed with best score: %.1f" % [generation, best_score])
@@ -360,6 +381,37 @@ func _on_evolution_finished(final_best_car):
 
 	# Show completion dialog
 	show_completion_dialog(final_best_car)
+
+func _on_generation_stats(generation: int, stats: Dictionary, breeding: Dictionary):
+	if not stats_panel:
+		return
+	var lines: Array[String] = []
+	lines.append("[b]Gen %d[/b]" % generation)
+	if stats and stats.has("count"):
+		lines.append("Count: %d  Min: %.1f  Q1: %.1f  Median: %.1f  Q3: %.1f  Max: %.1f  Mean: %.1f" % [
+			int(stats.get("count", 0)),
+			float(stats.get("min", 0.0)),
+			float(stats.get("q1", 0.0)),
+			float(stats.get("median", 0.0)),
+			float(stats.get("q3", 0.0)),
+			float(stats.get("max", 0.0)),
+			float(stats.get("mean", 0.0))
+		])
+	if breeding and breeding.has("survivors"):
+		lines.append("Survivors: %d  Children: %d  Retain: %.0f%%  Mut: %.0f%%" % [
+			int(breeding.get("survivors", 0)),
+			int(breeding.get("children", 0)),
+			float(breeding.get("retain_ratio", 0.0)) * 100.0,
+			float(breeding.get("mutation_rate", 0.0)) * 100.0
+		])
+	if breeding and breeding.has("pair_samples"):
+		var pairs: Array = breeding.get("pair_samples", []) as Array
+		var pair_strs: Array = []
+		for p in pairs:
+			pair_strs.append("(%s,%s)" % [str(p.get("p1", "-")), str(p.get("p2", "-"))])
+		lines.append("Pairs: " + ", ".join(pair_strs))
+	stats_panel.append_text("%s\n" % "\n".join(lines))
+	stats_panel.scroll_to_line(stats_panel.get_line_count())
 
 func show_completion_dialog(best_car):
 	var dialog = AcceptDialog.new()
