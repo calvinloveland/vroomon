@@ -5,6 +5,9 @@ extends Node2D
 
 signal simulation_completed(results: Array)
 
+const TerrainManager = preload("res://scripts/terrain/TerrainManager.gd")
+const TerrainPresets = preload("res://scripts/terrain/TerrainPresets.gd")
+
 const SIMULATION_TIME = 15.0  # seconds - longer for more interesting races
 const PHYSICS_STEPS_PER_SECOND = 60
 const CAR_SPACING = 150  # pixels between car starting positions
@@ -15,106 +18,36 @@ var simulation_timer: float = 0.0
 var is_simulating: bool = false
 var car_results: Array = []
 var motor_preview_always_on: bool = false
-
-# Area configuration (can be changed at runtime)
-var area_config: Dictionary = AreaConfigs.get_preset("Grassland")
+@onready var terrain_manager = TerrainManager.new()
+var terrain_name: String = "Grassland"
 
 func _ready():
-	# Create ground
-	setup_ground()
-
+	add_child(terrain_manager)
+	_rebuild_environment()
 	# Set physics settings for better simulation
 	Engine.physics_ticks_per_second = PHYSICS_STEPS_PER_SECOND
 
-func set_area_config(config: Dictionary) -> void:
-	area_config = config
+func set_terrain_preset(name: String) -> void:
+	terrain_name = name
 	_rebuild_environment()
 
 func _rebuild_environment():
-	# Remove existing terrain visuals/obstacles
-	for child in get_children():
-		if child is Node and child != ground and (child.is_in_group("terrain") or child is ColorRect):
-			child.queue_free()
-	# Recreate ground if needed
-	if is_instance_valid(ground):
-		ground.queue_free()
-	setup_ground()
+	# Clear any existing terrain and build via manager
+	terrain_manager.clear()
+	var profile := TerrainPresets.get_profile(terrain_name)
+	var generator := TerrainPresets.get_generator(terrain_name)
+	terrain_manager.set_profile(profile)
+	terrain_manager.set_generator(generator)
+	terrain_manager.rebuild(self)
+	ground = terrain_manager.get_ground()
 
 func setup_ground():
-	ground = StaticBody2D.new()
-	add_child(ground)
-
-	# Set ground to collision layer 1
-	ground.collision_layer = 1
-	ground.collision_mask = 0  # Ground doesn't need to detect anything
-
-	# Physics material for friction
-	var mat := PhysicsMaterial.new()
-	mat.friction = float(area_config.get("friction", 1.0))
-	ground.physics_material_override = mat
-
-	# Create longer ground for racing based on area
-	var ground_length: float = float(area_config.get("ground_length", 5000.0))
-	var ground_shape = RectangleShape2D.new()
-	ground_shape.size = Vector2(ground_length, 100)
-
-	var ground_collision = CollisionShape2D.new()
-	ground_collision.shape = ground_shape
-	ground_collision.position = Vector2(0, 400)  # Ground level
-
-	ground.add_child(ground_collision)
-
-	# Visual representation of ground
-	var ground_visual = ColorRect.new()
-	ground_visual.size = Vector2(ground_length, 100)
-	ground_visual.position = Vector2(-ground_length/2.0, 350)
-	var color_val = area_config.get("ground_color", Color.BROWN)
-	ground_visual.color = color_val
-	ground_visual.add_to_group("terrain")
-	add_child(ground_visual)
-
-	# Add some obstacles for more interesting terrain
-	_add_terrain_obstacles()
+	# Deprecated: terrain now built by TerrainManager
+	pass
 
 func _add_terrain_obstacles():
-	# Add bumps and ramps per area config
-	var obstacle_count: int = int(area_config.get("obstacle_count", 5))
-	var base_h: float = float(area_config.get("obstacle_height_base", 50.0))
-	var step_h: float = float(area_config.get("obstacle_height_step", 10.0))
-	var ground_length: float = float(area_config.get("ground_length", 5000.0))
-	var spacing = ground_length / float(obstacle_count + 1)
-
-	for i in range(obstacle_count):
-		var x_pos = spacing * float(i + 1)
-		var obstacle = StaticBody2D.new()
-		obstacle.add_to_group("terrain")
-		add_child(obstacle)
-
-		# Set obstacles to same collision layer as ground
-		obstacle.collision_layer = 1
-		obstacle.collision_mask = 0
-
-		# Physics material for friction matches ground
-		var mat := PhysicsMaterial.new()
-		mat.friction = float(area_config.get("friction", 1.0))
-		obstacle.physics_material_override = mat
-
-		var obstacle_shape = RectangleShape2D.new()
-		obstacle_shape.size = Vector2(100, base_h + i * step_h)
-
-		var obstacle_collision = CollisionShape2D.new()
-		obstacle_collision.shape = obstacle_shape
-		obstacle_collision.position = Vector2(x_pos, 375 - (obstacle_shape.size.y/2.0))
-
-		obstacle.add_child(obstacle_collision)
-
-		# Visual
-		var obstacle_visual = ColorRect.new()
-		obstacle_visual.size = obstacle_shape.size
-		obstacle_visual.position = Vector2(-obstacle_shape.size.x/2, -obstacle_shape.size.y/2)
-		obstacle_visual.color = Color.DARK_GRAY
-		obstacle_visual.add_to_group("terrain")
-		obstacle_collision.add_child(obstacle_visual)
+	# Deprecated: obstacles built by TerrainManager generators
+	pass
 
 func simulate_population(car_dna_dicts: Array) -> Array:
 	if is_simulating:

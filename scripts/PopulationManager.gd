@@ -21,7 +21,7 @@ var is_running: bool = false
 
 # Simple economy
 var wallet: int = 0
-var area_name: String = "Grassland"
+var terrain_name: String = "Grassland"
 
 func _ready():
 	# Load the simulation scene
@@ -36,16 +36,14 @@ func setup_simulation():
 	# Connect signals
 	simulation_scene.simulation_completed.connect(_on_simulation_completed)
 
-	# Set default area config
-	if simulation_scene.has_method("set_area_config"):
-		var config = AreaConfigs.get_preset(area_name)
-		simulation_scene.set_area_config(config)
+	# Set default terrain preset
+	if simulation_scene.has_method("set_terrain_preset"):
+		simulation_scene.set_terrain_preset(terrain_name)
 
-func set_area_preset(name: String) -> void:
-	area_name = name
-	if simulation_scene and simulation_scene.has_method("set_area_config"):
-		var config = AreaConfigs.get_preset(area_name)
-		simulation_scene.set_area_config(config)
+func set_terrain_preset(name: String) -> void:
+	terrain_name = name
+	if simulation_scene and simulation_scene.has_method("set_terrain_preset"):
+		simulation_scene.set_terrain_preset(terrain_name)
 
 func start_evolution():
 	if is_running:

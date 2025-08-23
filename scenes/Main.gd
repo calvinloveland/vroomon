@@ -113,7 +113,7 @@ func setup_ui():
 	area_hbox.add_child(area_label)
 	var area_option = OptionButton.new()
 	# Populate options sorted alphabetically
-	var names = AreaConfigs.get_presets().keys()
+	var names: Array[String] = TerrainPresets.get_names()
 	names.sort()
 	for name in names:
 		area_option.add_item(name)
@@ -282,8 +282,8 @@ func _follow_leader():
 	camera.position = leader_position
 
 func _on_area_changed(name: String) -> void:
-	if population_manager and population_manager.has_method("set_area_preset"):
-		population_manager.set_area_preset(name)
+	if population_manager and population_manager.has_method("set_terrain_preset"):
+		population_manager.set_terrain_preset(name)
 		status_label.text = "Area set to %s" % name
 
 func _on_start_button_pressed():
