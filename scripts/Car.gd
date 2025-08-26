@@ -6,11 +6,15 @@ extends RefCounted
 
 var dna: CarDNA
 var score: float = 0.0
+var id: String = ""
+var parents: Array[String] = []
+var mutated_from_parents: bool = false
 var _rect_bodies: Array[RigidBody2D] = []
 var _connectors: Array = []  # each: {a: RigidBody2D, b: RigidBody2D, theta_star: float, dbg: Line2D}
 var _root: Node2D
 var _debug_log_cooldown: float = 0.0
 var _debug_connectors: bool = true
+var _debug_connector_log_threshold_deg: float = 25.0
 
 func _init(car_dna: CarDNA = null):
 	if car_dna:
@@ -54,6 +58,12 @@ func mutate() -> Car:
 
 	var mutated_dna = CarDNA.new(new_dna_string)
 	return Car.new(mutated_dna)
+
+func set_lineage(new_id: String, new_parents: Array[String], mutated: bool = false) -> void:
+	"""Assign a unique ID and parent IDs for lineage tracking."""
+	id = new_id
+	parents = new_parents
+	mutated_from_parents = mutated
 
 func _get_random_char() -> String:
 	"""Get a random alphanumeric character"""
@@ -280,8 +290,9 @@ func build_in(parent: Node2D, car_index: int, dna_dict: Dictionary) -> RigidBody
 
 	# Choose primary body as the first rectangle
 	var primary: RigidBody2D = _rect_bodies[0]
-	# Visual variety: tint rectangle visuals
-	primary.modulate = Color.from_hsv(float(car_index) / 20.0, 0.8, 1.0)
+	# Lineage-based color: mix parent colors or derive from own id
+	var col: Color = _compute_lineage_color()
+	primary.modulate = col
 	return primary
 
 func _create_rectangle_body(root: Node2D, global_pos: Vector2, size: Vector2, car_index: int, car_layer: int, density: float) -> RigidBody2D:
@@ -307,6 +318,8 @@ func _create_rectangle_body(root: Node2D, global_pos: Vector2, size: Vector2, ca
 	visual.size = rect_shape.size
 	visual.position = Vector2(-rect_shape.size.x / 2.0, -rect_shape.size.y / 2.0)
 	visual.color = Color.from_hsv(float(car_index) / 20.0, 0.6, 0.8)
+	# Override with lineage color for consistency across parts
+	visual.color = _compute_lineage_color()
 	collision.add_child(visual)
 
 	# Mass from area * density (scaled)
@@ -406,6 +419,31 @@ func _make_circle_points(radius: float, segments: int = 24) -> PackedVector2Arra
 		pts.append(Vector2(cos(t), sin(t)) * radius)
 	return pts
 
+func _hash_to_unit(value: String) -> float:
+	# Deterministic 0..1 from string
+	var h: int = 0
+	for i in range(value.length()):
+		h = int((h * 131 + int(value.unicode_at(i))) & 0x7fffffff)
+	return float(h % 10000) / 10000.0
+
+func _color_from_id(s: String) -> Color:
+	if s == "" or s == null:
+		return Color(0.7, 0.7, 0.7)
+	var h := _hash_to_unit(s)
+	var sat := 0.75
+	var val := 0.95
+	return Color.from_hsv(h, sat, val)
+
+func _compute_lineage_color() -> Color:
+	# If two parents, mix their hues; else derive from self id or dna
+	if parents and parents.size() >= 2:
+		var c1 := _color_from_id(parents[0])
+		var c2 := _color_from_id(parents[1])
+		return c1.lerp(c2, 0.5)
+	# Fallback: from own id, else from dna string
+	var key := id if id != "" else get_dna_string()
+	return _color_from_id(key)
+
 func _calculate_wheel_power(powertrain_parts: Array, wheel_position: int, car_dna: CarDNA = null, dna_index: int = 0) -> float:
 	var current_power := 0.0
 	var _current_torque := 10000.0
@@ -478,8 +516,11 @@ func update_connectors(delta: float) -> void:
 			# Green near target, fades to red as error grows
 			l.default_color = Color(0, 1, 0, 0.85).lerp(Color(1, 0, 0, 0.9), t)
 			l.width = 2.0 + 2.0 * t
-		if i == 0 and _debug_connectors and _debug_log_cooldown <= 0.0:
-			print("Connector[0] theta=", rad_to_deg(theta), "°, target=", rad_to_deg(theta_star), "°, err=", rad_to_deg(err))
-			_debug_log_cooldown = 0.5
+		# Log only when far from target and cooldown elapsed
+		if _debug_connectors and _debug_log_cooldown <= 0.0:
+			var err_deg: float = abs(rad_to_deg(err))
+			if err_deg >= _debug_connector_log_threshold_deg:
+				print("Connector deviation: ", "err=", err_deg, "° target=", rad_to_deg(theta_star))
+				_debug_log_cooldown = 1.0
 	if _debug_log_cooldown > 0.0:
 		_debug_log_cooldown -= delta

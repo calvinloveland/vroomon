@@ -40,10 +40,23 @@ Genetic algorithm-based car evolution simulator built in Godot 4. Cars are defin
 - `scripts/CarSimulation.gd` (scene script attached at runtime)
   - Builds cars from DNA, Godot physics, race simulation, scoring, cleanup
   - Collision layers: ground on layer 1; cars on unique layers (2–30) and only collide with ground
+  - Uses TerrainManager + presets; API: `set_terrain_preset(name: String)`
 - `scripts/PopulationManager.gd` (class `PopulationManager`)
   - Evolution loop, population init, scoring via `CarSimulation`, selection, elitism, breeding
 - `scenes/GameManager.gd` (class `GameManager`)
   - Scene switching between `MainMenu`, `Main`, `TestDrive`
+
+### Terrain System
+- `scripts/terrain/TerrainManager.gd` (class `TerrainManager`)
+  - Owns a `TerrainProfile` and a `TerrainGeneratorBase` implementation; builds/clears terrain.
+- `scripts/terrain/TerrainProfile.gd` (class `TerrainProfile`)
+  - Resource with ground_length, friction, ground_height, colors, obstacle_count, obstacle_params, seed.
+- `scripts/terrain/TerrainGeneratorBase.gd`
+  - Abstract Resource: `generate(parent, profile) -> Dictionary`, `clear(handle)`.
+- Generators under `scripts/terrain/generators/`
+  - `FlatTerrainGenerator.gd`, `BumpsTerrainGenerator.gd` (more can be added).
+- `scripts/terrain/TerrainPresets.gd` (class `TerrainPresets`)
+  - Helper returning a profile and generator by preset name; `get_names()` for UI.
 
 ## Coding Standards (GDScript)
 - snake_case for variables and functions; PascalCase for classes/constants.
@@ -96,13 +109,13 @@ Current defaults (PopulationManager):
 - Add DNA translation rules:
   1) Extend `_char_to_frame_part` / `_char_to_powertrain_part` in `CarDNA.gd`
   2) Add new parameter extractors (e.g., suspension stiffness)
-  3) Use new parameters in `CarSimulation.build_car_from_dna`
+  3) Use new parameters in car construction (via `Car.build_in` usage)
   4) Test with diverse DNA strings
 - Modify genetics:
   - Adjust `Car.mutate()` and crossover strategy
   - Consider length distribution effects and maintain validity
 - Tweak evolution parameters in `PopulationManager.gd` (sizes, rates, generations, retain ratio)
-- Update terrain in `CarSimulation._add_terrain_obstacles()`
+- Terrain: add a new generator under `scripts/terrain/generators/` and select it via `TerrainPresets` + `CarSimulation.set_terrain_preset()`.
 
 ## Scoring
 - Score = forward distance + small survival bonus; strong penalty if car falls.
@@ -114,9 +127,8 @@ Current defaults (PopulationManager):
 - Monitor memory when increasing population.
 
 ## Backward Compatibility
-- New format: `{ "dna_string": "alphanumeric" }`
-- Old format still accepted: `{ "frame": [..], "powertrain": [..] }`
-- Prefer new format in all new code and serialization.
+- Terrain: no legacy `AreaConfigs` usage; terrain is provided exclusively by `TerrainManager` + generators and presets.
+- DNA: New format `{ "dna_string": "alphanumeric" }` is preferred; old dict format may still exist in code paths but new code should target the string format.
 
 ## Common Pitfalls & Gotchas
 - Resource paths: always include `res://scripts/` or `res://scenes/` prefixes when loading.
@@ -142,7 +154,15 @@ Current defaults (PopulationManager):
 │   ├── CarDNA.gd
 │   ├── CarSimulation.gd
 │   ├── PopulationManager.gd
-│   └── population.gd
+│   ├── population.gd
+│   └── terrain/
+│       ├── TerrainManager.gd
+│       ├── TerrainProfile.gd
+│       ├── TerrainGeneratorBase.gd
+│       ├── TerrainPresets.gd
+│       └── generators/
+│           ├── FlatTerrainGenerator.gd
+│           └── BumpsTerrainGenerator.gd
 └── old_code/
     └── vroomon/ (Python reference implementation + tests)
 ```
@@ -161,9 +181,13 @@ var mutated = car.mutate()
 # Build & simulate (via PopulationManager)
 var pm = PopulationManager.new()
 pm.start_evolution()
+
+# Switch terrain preset at runtime
+var sim = load("res://scripts/CarSimulation.gd").new()
+sim.set_terrain_preset("Flat")
 ```
 
-Priorities: maintain GA correctness with string DNA, physics stability via DNA-derived parameters, clean and maintainable code, and dual DNA format support.
+Priorities: maintain GA correctness with string DNA, physics stability via DNA-derived parameters, clean and maintainable code, and the new TerrainManager + generator-based terrain.
 
 ## Useful Godot docs
 - GDScript basics: https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_basics.html

@@ -64,28 +64,12 @@ func setup_ui():
 	pop_label.modulate = Color.WHITE
 	pop_hbox.add_child(pop_label)
 	var pop_spinbox = SpinBox.new()
-	pop_spinbox.min_value = 5
-	pop_spinbox.max_value = 30
-	pop_spinbox.value = 15
+	pop_spinbox.min_value = 10
+	pop_spinbox.max_value = 200
+	pop_spinbox.value = 100
 	pop_spinbox.custom_minimum_size.x = 80
 	pop_spinbox.value_changed.connect(_on_population_size_changed)
 	pop_hbox.add_child(pop_spinbox)
-
-	# Generations
-	var gen_hbox = HBoxContainer.new()
-	settings_panel.add_child(gen_hbox)
-	var gen_label = Label.new()
-	gen_label.text = "Generations:"
-	gen_label.custom_minimum_size.x = 80
-	gen_label.modulate = Color.WHITE
-	gen_hbox.add_child(gen_label)
-	var gen_spinbox = SpinBox.new()
-	gen_spinbox.min_value = 1
-	gen_spinbox.max_value = 20
-	gen_spinbox.value = 10
-	gen_spinbox.custom_minimum_size.x = 80
-	gen_spinbox.value_changed.connect(_on_generations_changed)
-	gen_hbox.add_child(gen_spinbox)
 
 	# DNA length
 	var dna_hbox = HBoxContainer.new()
@@ -97,17 +81,17 @@ func setup_ui():
 	dna_hbox.add_child(dna_label)
 	var dna_spinbox = SpinBox.new()
 	dna_spinbox.min_value = 3
-	dna_spinbox.max_value = 8
-	dna_spinbox.value = 5
+	dna_spinbox.max_value = 24
+	dna_spinbox.value = 12
 	dna_spinbox.custom_minimum_size.x = 80
 	dna_spinbox.value_changed.connect(_on_dna_length_changed)
 	dna_hbox.add_child(dna_spinbox)
 
-	# Area preset
+	# Terrain preset
 	var area_hbox = HBoxContainer.new()
 	settings_panel.add_child(area_hbox)
 	var area_label = Label.new()
-	area_label.text = "Area:"
+	area_label.text = "Terrain:"
 	area_label.custom_minimum_size.x = 80
 	area_label.modulate = Color.WHITE
 	area_hbox.add_child(area_label)
@@ -141,11 +125,25 @@ func setup_ui():
 	back_button.pressed.connect(_on_back_pressed)
 	button_container.add_child(back_button)
 
+	# Load button
+	var load_button = Button.new()
+	load_button.text = "Load"
+	load_button.custom_minimum_size = Vector2(80, 35)
+	load_button.pressed.connect(func(): _on_load_pressed())
+	button_container.add_child(load_button)
+
 	start_button = Button.new()
 	start_button.text = "Start Evolution"
 	start_button.custom_minimum_size = Vector2(180, 35)
 	start_button.pressed.connect(_on_start_button_pressed)
 	overlay_panel.add_child(start_button)
+
+	# Save now button
+	var save_button = Button.new()
+	save_button.text = "Save Now"
+	save_button.custom_minimum_size = Vector2(110, 28)
+	save_button.pressed.connect(func(): if population_manager and population_manager.has_method("save_now"): population_manager.save_now())
+	overlay_panel.add_child(save_button)
 
 	# Spacer
 	var spacer2 = Control.new()
@@ -231,9 +229,9 @@ func setup_population_manager():
 	population_manager.generation_completed.connect(_on_generation_completed)
 	population_manager.generation_stats.connect(_on_generation_stats)
 	population_manager.evolution_finished.connect(_on_evolution_finished)
-	# Initialize area preset
-	if population_manager.has_method("set_area_preset"):
-		population_manager.set_area_preset("Grassland")
+	# Initialize terrain preset
+	if population_manager.has_method("set_terrain_preset"):
+		population_manager.set_terrain_preset("Grassland")
 
 func _input(event):
 	# Handle escape key
@@ -299,8 +297,29 @@ func _on_start_button_pressed():
 	progress_bar.value = 0
 	progress_bar.max_value = population_manager.generations
 
-	# Start the evolution process
-	population_manager.start_evolution()
+	# Try to load previous state; if none, start fresh
+	var loaded: bool = false
+	if population_manager and population_manager.has_method("try_load_state"):
+		loaded = population_manager.try_load_state()
+	if loaded:
+		status_label.text = "Loaded previous state; continuing evolution..."
+		population_manager.is_running = true
+		population_manager.run_evolution()
+	else:
+		# Start the evolution process
+		population_manager.start_evolution()
+
+func _on_load_pressed():
+	if not population_manager or not population_manager.has_method("try_load_state"):
+		return
+	var ok: bool = population_manager.try_load_state()
+	if ok:
+		status_label.text = "State loaded."
+		# Reflect wallet and maybe other UI
+		if wallet_label:
+			wallet_label.text = "Wallet: $%d" % population_manager.wallet
+	else:
+		status_label.text = "No saved state found."
 
 func _on_back_pressed():
 	if is_evolution_running:
@@ -347,10 +366,7 @@ func _on_population_size_changed(value: float):
 		population_manager.population_size = int(value)
 
 func _on_generations_changed(value: float):
-	if population_manager:
-		population_manager.generations = int(value)
-		if progress_bar:
-			progress_bar.max_value = int(value)
+	pass # Deprecated: evolution runs indefinitely; progress bar loops visually
 
 func _on_dna_length_changed(value: float):
 	if population_manager:

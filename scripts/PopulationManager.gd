@@ -8,7 +8,7 @@ signal generation_completed(generation: int, best_score: float)
 signal generation_stats(generation: int, stats: Dictionary, breeding: Dictionary)
 signal evolution_finished(final_best_car)
 
-var population_size: int = 20
+var population_size: int = 100
 var dna_length: int = 12  # Target length for DNA strings
 var generations: int = 10  # Ignored in infinite mode; kept for UI compatibility
 var retain_ratio: float = 0.5
@@ -18,6 +18,15 @@ var current_generation: int = 0
 var population: Array = []
 var simulation_scene: Node2D
 var is_running: bool = false
+
+# Logging and lineage tracking
+var _run_id: String = ""
+var _log_dir: String = ""
+var _log_path: String = ""
+var _id_counter: int = 0
+var _last_results: Array = []
+
+const SaveManager = preload("res://scripts/SaveManager.gd")
 
 # Simple economy
 var wallet: int = 0
@@ -53,6 +62,13 @@ func start_evolution():
 	print("Car Evolution Simulation Starting...")
 	print("Using new alphanumeric DNA string format")
 
+	# Initialize run logging
+	var dt := Time.get_datetime_dict_from_system()
+	_run_id = "%04d%02d%02d_%02d%02d%02d" % [int(dt["year"]), int(dt["month"]), int(dt["day"]), int(dt["hour"]), int(dt["minute"]), int(dt["second"])]
+	_log_dir = "user://evolution_logs"
+	DirAccess.make_dir_recursive_absolute(_log_dir)
+	_log_path = _log_dir + "/run_" + _run_id + ".jsonl"
+
 	# Generate initial population
 	population = initialize_population(population_size, dna_length)
 	print("Initial population created: ", population.size(), " cars")
@@ -65,6 +81,8 @@ func initialize_population(size: int, target_length: int) -> Array:
 	for i in range(size):
 		var dna = generate_random_dna(target_length)
 		var car = Car.new(dna)
+		# assign lineage id
+		car.set_lineage(_next_id(), [])
 		pop.append(car)
 	return pop
 
@@ -88,6 +106,8 @@ func run_evolution():
 
 		# Score population using physics simulation
 		await score_population_async(population)
+		# Persist JSONL logs for this generation
+		_log_generation(gen, population, _last_results)
 
 		# Sort by score (descending)
 		population.sort_custom(func(a, b): return a.score > b.score)
@@ -104,6 +124,9 @@ func run_evolution():
 
 		emit_signal("generation_completed", gen + 1, best_car.score)
 		emit_signal("generation_stats", gen + 1, stats, _last_breeding_stats)
+
+		# Auto-save state each generation
+		SaveManager.save_population_state(self)
 
 		# Economy update (simple): earn based on best score
 		wallet += int(max(0.0, best_car.score) / 50.0)
@@ -153,14 +176,17 @@ func score_population_async(pop: Array):
 
 	# Run the race with all cars at once
 	var race_results = await simulation_scene.simulate_population(car_dna_dicts)
+	_last_results = race_results
 
 	# Assign scores back to the cars
+	# Results come sorted by score with 'car_index' back-reference; build mapping
+	var index_to_score: Dictionary = {}
+	for r in race_results:
+		index_to_score[int(r.car_index)] = float(r.score)
 	for i in range(pop.size()):
-		if i < race_results.size():
-			pop[i].score = race_results[i].score
-			print("  Car ", i + 1, " ('", pop[i].get_dna_string(), "') score: ", race_results[i].score)
-		else:
-			pop[i].score = 0.0
+		var s: float = float(index_to_score.get(i, 0.0))
+		pop[i].score = s
+		print("  Car ", i + 1, " ('", pop[i].get_dna_string(), "') score: ", s)
 
 func _on_simulation_completed(_results: Array) -> void:
 	# CarSimulation emits an Array of results at the end of a full race.
@@ -208,6 +234,9 @@ func evolve_population(scored_pop: Array) -> Dictionary:
 		var child = Car.reproduce(parent1, parent2)
 		if randf() < mutation_rate:
 			child = child.mutate()
+		# assign lineage id and parents
+		var pids: Array[String] = [parent1.id, parent2.id]
+		child.set_lineage(_next_id(), pids, true)
 		children.append(child)
 
 	print("  Children: ", children.size(), " cars")
@@ -221,7 +250,52 @@ func evolve_population(scored_pop: Array) -> Dictionary:
 	}
 	return {"population": survivors + children, "breeding": breeding}
 
+func _next_id() -> String:
+	_id_counter += 1
+	return "%s-%05d" % [_run_id, _id_counter]
+
+func _log_generation(gen: int, pop: Array, results: Array) -> void:
+	# Append JSON per car: { run_id, gen, id, parents, dna, score, meta }
+	var fh := FileAccess.open(_log_path, FileAccess.READ_WRITE)
+	if fh == null:
+		# Try create if not exist
+		fh = FileAccess.open(_log_path, FileAccess.WRITE)
+	if fh == null:
+		push_error("Failed to open log file: " + _log_path)
+		return
+	# Move to end for append
+	fh.seek_end()
+	for i in range(pop.size()):
+		var car: Car = pop[i]
+		var entry := {
+			"run_id": _run_id,
+			"generation": gen + 1,
+			"index": i,
+			"id": car.id,
+			"parents": car.parents,
+			"mutated": car.mutated_from_parents,
+			"dna": car.dna.to_dict(),
+			"dna_string": car.get_dna_string(),
+			"score": car.score,
+			"terrain": terrain_name
+		}
+		fh.store_line(JSON.stringify(entry))
+	fh.flush()
+	fh.close()
+
 func stop_evolution():
 	# Stop the current evolution process
 	is_running = false
 	print("Evolution stopped by user")
+	# Save on stop
+	SaveManager.save_population_state(self)
+
+func save_now():
+	SaveManager.save_population_state(self)
+
+func try_load_state() -> bool:
+	var state := SaveManager.load_population_state()
+	if not state:
+		return false
+	var ok := SaveManager.apply_population_state(self, state)
+	return ok
