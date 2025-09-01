@@ -95,14 +95,17 @@ static func apply_population_state(pm: PopulationManager, state: Dictionary) -> 
 			var car := Car.new(CarDNA.new())
 			car.dna.from_dict(dna_dict)
 			var id_str: String = String(entry.get("id", ""))
-			var parents: Array[String] = entry.get("parents", [])
+			var parents_any: Array = entry.get("parents", [])
+			var parents: Array[String] = []
+			for p in parents_any:
+				parents.append(String(p))
 			var mutated: bool = bool(entry.get("mutated", false))
 			car.set_lineage(id_str, parents, mutated)
 			car.score = float(entry.get("score", 0.0))
 			new_pop.append(car)
 			# Update counter from id suffix if matches pattern RUN-00001
 			if id_str.find("-") != -1:
-				var parts := id_str.rsplit("-", true, 1)
+				var parts: PackedStringArray = id_str.rsplit("-", true, 1)
 				if parts.size() == 2:
 					var seq := int(parts[1])
 					if seq > max_seq:
