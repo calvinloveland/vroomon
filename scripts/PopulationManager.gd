@@ -25,8 +25,11 @@ var _log_dir: String = ""
 var _log_path: String = ""
 var _id_counter: int = 0
 var _last_results: Array = []
+var genealogy: Dictionary = {}  # id -> Array[String] (children)
+static func _cmp_car_score_desc(a: Car, b: Car) -> bool:
+	return a.score > b.score
 
-const SaveManager = preload("res://scripts/SaveManager.gd")
+const SaveMgr = preload("res://scripts/SaveManager.gd")
 
 # Simple economy
 var wallet: int = 0
@@ -49,8 +52,8 @@ func setup_simulation():
 	if simulation_scene.has_method("set_terrain_preset"):
 		simulation_scene.set_terrain_preset(terrain_name)
 
-func set_terrain_preset(name: String) -> void:
-	terrain_name = name
+func set_terrain_preset(preset_name: String) -> void:
+	terrain_name = preset_name
 	if simulation_scene and simulation_scene.has_method("set_terrain_preset"):
 		simulation_scene.set_terrain_preset(terrain_name)
 
@@ -83,6 +86,8 @@ func initialize_population(size: int, target_length: int) -> Array:
 		var car = Car.new(dna)
 		# assign lineage id
 		car.set_lineage(_next_id(), [])
+		# seed genealogy entry
+		genealogy[car.id] = []
 		pop.append(car)
 	return pop
 
@@ -110,7 +115,7 @@ func run_evolution():
 		_log_generation(gen, population, _last_results)
 
 		# Sort by score (descending)
-		population.sort_custom(func(a, b): return a.score > b.score)
+		population.sort_custom(_cmp_car_score_desc)
 
 		var best_car = population[0]
 		print("Best score: ", best_car.score)
@@ -126,7 +131,7 @@ func run_evolution():
 		emit_signal("generation_stats", gen + 1, stats, _last_breeding_stats)
 
 		# Auto-save state each generation
-		SaveManager.save_population_state(self)
+		SaveMgr.save_population_state(self)
 
 		# Economy update (simple): earn based on best score
 		wallet += int(max(0.0, best_car.score) / 50.0)
@@ -154,9 +159,11 @@ func _compute_score_stats(scores: Array) -> Dictionary:
 	for s in sorted:
 		sum_val += float(s)
 	var mean: float = sum_val / float(n)
-	var median: float = (float(sorted[n/2]) + float(sorted[(n-1)/2])) / 2.0
-	var q1: float = float(sorted[int(floor((n - 1) * 0.25))])
-	var q3: float = float(sorted[int(floor((n - 1) * 0.75))])
+	var i_hi: int = int(floor(float(n) / 2.0))
+	var i_lo: int = int(floor(float(n - 1) / 2.0))
+	var median: float = (float(sorted[i_hi]) + float(sorted[i_lo])) / 2.0
+	var q1: float = float(sorted[int(floor((float(n) - 1.0) * 0.25))])
+	var q3: float = float(sorted[int(floor((float(n) - 1.0) * 0.75))])
 	result["count"] = n
 	result["mean"] = mean
 	result["median"] = median
@@ -172,7 +179,14 @@ func score_population_async(pop: Array):
 	# Prepare all car DNA data for the race
 	var car_dna_dicts = []
 	for car in pop:
-		car_dna_dicts.append(car.dna.to_dict())
+		var d: Dictionary = car.dna.to_dict()
+		# Attach lineage meta for UI/selection
+		d["meta"] = {
+			"id": car.id,
+			"parents": car.parents,
+			"dna_string": car.get_dna_string()
+		}
+		car_dna_dicts.append(d)
 
 	# Run the race with all cars at once
 	var race_results = await simulation_scene.simulate_population(car_dna_dicts)
@@ -237,6 +251,21 @@ func evolve_population(scored_pop: Array) -> Dictionary:
 		# assign lineage id and parents
 		var pids: Array[String] = [parent1.id, parent2.id]
 		child.set_lineage(_next_id(), pids, true)
+		# update genealogy
+		if not genealogy.has(parent1.id):
+			genealogy[parent1.id] = []
+		if not genealogy.has(parent2.id):
+			genealogy[parent2.id] = []
+		if not genealogy.has(child.id):
+			genealogy[child.id] = []
+		var kids1: Array = genealogy[parent1.id]
+		if not kids1.has(child.id):
+			kids1.append(child.id)
+		genealogy[parent1.id] = kids1
+		var kids2: Array = genealogy[parent2.id]
+		if not kids2.has(child.id):
+			kids2.append(child.id)
+		genealogy[parent2.id] = kids2
 		children.append(child)
 
 	print("  Children: ", children.size(), " cars")
@@ -254,7 +283,7 @@ func _next_id() -> String:
 	_id_counter += 1
 	return "%s-%05d" % [_run_id, _id_counter]
 
-func _log_generation(gen: int, pop: Array, results: Array) -> void:
+func _log_generation(gen: int, pop: Array, _results: Array) -> void:
 	# Append JSON per car: { run_id, gen, id, parents, dna, score, meta }
 	var fh := FileAccess.open(_log_path, FileAccess.READ_WRITE)
 	if fh == null:
@@ -288,14 +317,34 @@ func stop_evolution():
 	is_running = false
 	print("Evolution stopped by user")
 	# Save on stop
-	SaveManager.save_population_state(self)
+	SaveMgr.save_population_state(self)
 
 func save_now():
-	SaveManager.save_population_state(self)
+	SaveMgr.save_population_state(self)
 
 func try_load_state() -> bool:
-	var state := SaveManager.load_population_state()
+	var state := SaveMgr.load_population_state()
 	if not state:
 		return false
-	var ok := SaveManager.apply_population_state(self, state)
+	var ok := SaveMgr.apply_population_state(self, state)
 	return ok
+
+func get_family_tree(id: String, depth: int = 2) -> Dictionary:
+	# Returns { id, parents: [..], children: [subtrees...] }
+	var node := {}
+	var car_found: Car = null
+	for c in population:
+		if c.id == id:
+			car_found = c
+			break
+	if car_found == null:
+		return node
+	node["id"] = id
+	node["parents"] = car_found.parents
+	var children_ids: Array = genealogy.get(id, [])
+	var child_nodes := []
+	if depth > 0:
+		for cid in children_ids:
+			child_nodes.append(get_family_tree(str(cid), depth - 1))
+	node["children"] = child_nodes
+	return node

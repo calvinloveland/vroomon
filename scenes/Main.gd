@@ -3,6 +3,8 @@ extends Control
 # Main UI for Car Evolution Simulation
 # Simple overlay controls on single viewport
 
+const EvolutionSidebar = preload("res://scripts/ui/EvolutionSidebar.gd")
+
 @onready var population_manager: Node2D
 @onready var start_button: Button
 @onready var back_button: Button
@@ -16,6 +18,12 @@ extends Control
 var is_evolution_running: bool = false
 var wallet_label: Label
 var stats_panel: RichTextLabel
+var selection_panel: Panel
+var selection_details: RichTextLabel
+var thumb_scroll: ScrollContainer
+var thumb_flow: HFlowContainer
+var _selected_entry: Dictionary = {}
+var sidebar: EvolutionSidebar
 
 func _ready():
 	setup_ui()
@@ -23,38 +31,54 @@ func _ready():
 	setup_camera()
 
 func setup_ui():
-	# Create overlay panel in top-left corner
-	var overlay_panel = VBoxContainer.new()
-	overlay_panel.position = Vector2(10, 10)
-	overlay_panel.custom_minimum_size = Vector2(300, 400)
-	add_child(overlay_panel)
+	# Create modular sidebar and populate sections
+	sidebar = EvolutionSidebar.new()
+	add_child(sidebar)
 
-	# Add semi-transparent background
-	var background = ColorRect.new()
-	background.color = Color(0, 0, 0, 0.7)  # Semi-transparent black
-	background.size = Vector2(320, 420)
-	background.position = Vector2(0, 0)
-	add_child(background)
-	background.move_to_front()
-	overlay_panel.move_to_front()
-
-	# Title
+	# Run section content
+	var run_box := VBoxContainer.new()
 	var title = Label.new()
 	title.text = "Car Evolution"
 	title.add_theme_font_size_override("font_size", 20)
 	title.modulate = Color.WHITE
-	overlay_panel.add_child(title)
+	run_box.add_child(title)
+	var button_row := HBoxContainer.new()
+	back_button = Button.new()
+	back_button.text = "🏠 Menu"
+	back_button.custom_minimum_size = Vector2(80, 35)
+	back_button.pressed.connect(_on_back_pressed)
+	button_row.add_child(back_button)
+	var load_button = Button.new()
+	load_button.text = "Load"
+	load_button.custom_minimum_size = Vector2(80, 35)
+	load_button.pressed.connect(func(): _on_load_pressed())
+	button_row.add_child(load_button)
+	var save_button = Button.new()
+	save_button.text = "Save Now"
+	save_button.custom_minimum_size = Vector2(110, 28)
+	save_button.pressed.connect(func(): if population_manager and population_manager.has_method("save_now"): population_manager.save_now())
+	button_row.add_child(save_button)
+	start_button = Button.new()
+	start_button.text = "Start Evolution"
+	start_button.custom_minimum_size = Vector2(180, 35)
+	start_button.pressed.connect(_on_start_button_pressed)
+	button_row.add_child(start_button)
+	run_box.add_child(button_row)
+	# Optional controls help
+	var controls_info = Label.new()
+	controls_info.text = "• Arrow keys: Move camera\n• Mouse wheel: Zoom\n• Space: Follow leader\n• ESC: Quit"
+	controls_info.add_theme_font_size_override("font_size", 10)
+	controls_info.modulate = Color.LIGHT_GRAY
+	run_box.add_child(controls_info)
+	sidebar.set_section_content("Run", run_box)
 
-	# Settings
+	# Settings section content
 	settings_panel = VBoxContainer.new()
-	overlay_panel.add_child(settings_panel)
-
 	var settings_label = Label.new()
 	settings_label.text = "Settings:"
 	settings_label.add_theme_font_size_override("font_size", 14)
 	settings_label.modulate = Color.WHITE
 	settings_panel.add_child(settings_label)
-
 	# Population size
 	var pop_hbox = HBoxContainer.new()
 	settings_panel.add_child(pop_hbox)
@@ -70,7 +94,6 @@ func setup_ui():
 	pop_spinbox.custom_minimum_size.x = 80
 	pop_spinbox.value_changed.connect(_on_population_size_changed)
 	pop_hbox.add_child(pop_spinbox)
-
 	# DNA length
 	var dna_hbox = HBoxContainer.new()
 	settings_panel.add_child(dna_hbox)
@@ -86,7 +109,6 @@ func setup_ui():
 	dna_spinbox.custom_minimum_size.x = 80
 	dna_spinbox.value_changed.connect(_on_dna_length_changed)
 	dna_hbox.add_child(dna_spinbox)
-
 	# Terrain preset
 	var area_hbox = HBoxContainer.new()
 	settings_panel.add_child(area_hbox)
@@ -96,95 +118,49 @@ func setup_ui():
 	area_label.modulate = Color.WHITE
 	area_hbox.add_child(area_label)
 	var area_option = OptionButton.new()
-	# Populate options sorted alphabetically
 	var names: Array[String] = TerrainPresets.get_names()
 	names.sort()
-	for name in names:
-		area_option.add_item(name)
-	# Default select Grassland if present
+	for preset_name in names:
+		area_option.add_item(preset_name)
 	for i in range(area_option.get_item_count()):
 		if area_option.get_item_text(i) == "Grassland":
 			area_option.select(i)
 			break
 	area_option.item_selected.connect(func(index): _on_area_changed(area_option.get_item_text(index)))
 	area_hbox.add_child(area_option)
+	sidebar.set_section_content("Settings", settings_panel)
 
-	# Spacer
-	var spacer1 = Control.new()
-	spacer1.custom_minimum_size.y = 10
-	overlay_panel.add_child(spacer1)
-
-	# Button container
-	var button_container = HBoxContainer.new()
-	overlay_panel.add_child(button_container)
-
-	# Back button
-	back_button = Button.new()
-	back_button.text = "🏠 Menu"
-	back_button.custom_minimum_size = Vector2(80, 35)
-	back_button.pressed.connect(_on_back_pressed)
-	button_container.add_child(back_button)
-
-	# Load button
-	var load_button = Button.new()
-	load_button.text = "Load"
-	load_button.custom_minimum_size = Vector2(80, 35)
-	load_button.pressed.connect(func(): _on_load_pressed())
-	button_container.add_child(load_button)
-
-	start_button = Button.new()
-	start_button.text = "Start Evolution"
-	start_button.custom_minimum_size = Vector2(180, 35)
-	start_button.pressed.connect(_on_start_button_pressed)
-	overlay_panel.add_child(start_button)
-
-	# Save now button
-	var save_button = Button.new()
-	save_button.text = "Save Now"
-	save_button.custom_minimum_size = Vector2(110, 28)
-	save_button.pressed.connect(func(): if population_manager and population_manager.has_method("save_now"): population_manager.save_now())
-	overlay_panel.add_child(save_button)
-
-	# Spacer
-	var spacer2 = Control.new()
-	spacer2.custom_minimum_size.y = 15
-	overlay_panel.add_child(spacer2)
-
-	# Progress info
+	# Progress section content
+	var progress_box := VBoxContainer.new()
 	generation_label = Label.new()
 	generation_label.text = "Generation: Not started"
 	generation_label.add_theme_font_size_override("font_size", 12)
 	generation_label.modulate = Color.WHITE
-	overlay_panel.add_child(generation_label)
-
+	progress_box.add_child(generation_label)
 	best_score_label = Label.new()
 	best_score_label.text = "Best Score: --"
 	best_score_label.add_theme_font_size_override("font_size", 12)
 	best_score_label.modulate = Color.WHITE
-	overlay_panel.add_child(best_score_label)
-
+	progress_box.add_child(best_score_label)
 	wallet_label = Label.new()
 	wallet_label.text = "Wallet: $0"
 	wallet_label.add_theme_font_size_override("font_size", 12)
 	wallet_label.modulate = Color.WHITE
-	overlay_panel.add_child(wallet_label)
-
+	progress_box.add_child(wallet_label)
 	progress_bar = ProgressBar.new()
 	progress_bar.custom_minimum_size.y = 20
 	progress_bar.show_percentage = false
-	overlay_panel.add_child(progress_bar)
-
+	progress_box.add_child(progress_bar)
 	status_label = Label.new()
 	status_label.text = "Ready to start"
-	# Stats panel
-	var spacer_stats = Control.new()
-	spacer_stats.custom_minimum_size.y = 10
-	overlay_panel.add_child(spacer_stats)
+	status_label.add_theme_font_size_override("font_size", 11)
+	status_label.modulate = Color.LIGHT_GRAY
+	progress_box.add_child(status_label)
 	var stats_title = Label.new()
 	stats_title.text = "Generation Stats"
 	stats_title.add_theme_font_size_override("font_size", 12)
 	stats_title.modulate = Color.WHITE
-	overlay_panel.add_child(stats_title)
+	progress_box.add_child(stats_title)
 	stats_panel = RichTextLabel.new()
 	stats_panel.bbcode_enabled = true
 	stats_panel.scroll_active = true
@@ -192,27 +168,38 @@ func setup_ui():
 	stats_panel.fit_content = true
 	stats_panel.custom_minimum_size = Vector2(300, 160)
 	stats_panel.add_theme_color_override("default_color", Color(0.9, 0.9, 0.9))
-	overlay_panel.add_child(stats_panel)
-	status_label.add_theme_font_size_override("font_size", 11)
-	status_label.modulate = Color.LIGHT_GRAY
-	overlay_panel.add_child(status_label)
+	progress_box.add_child(stats_panel)
+	sidebar.set_section_content("Progress", progress_box)
 
-	# Camera controls info
-	var spacer3 = Control.new()
-	spacer3.custom_minimum_size.y = 15
-	overlay_panel.add_child(spacer3)
+	# Selection section content
+	var selection_box := VBoxContainer.new()
+	var sel_title := Label.new()
+	sel_title.text = "Selected Car"
+	sel_title.add_theme_font_size_override("font_size", 12)
+	sel_title.modulate = Color.WHITE
+	selection_box.add_child(sel_title)
+	selection_details = RichTextLabel.new()
+	selection_details.bbcode_enabled = true
+	selection_details.fit_content = true
+	selection_details.custom_minimum_size = Vector2(300, 110)
+	selection_box.add_child(selection_details)
+	var thumbs_title := Label.new()
+	thumbs_title.text = "Currently Racing"
+	thumbs_title.add_theme_font_size_override("font_size", 12)
+	thumbs_title.modulate = Color.WHITE
+	selection_box.add_child(thumbs_title)
+	thumb_scroll = ScrollContainer.new()
+	thumb_scroll.custom_minimum_size = Vector2(300, 110)
+	selection_box.add_child(thumb_scroll)
+	thumb_flow = HFlowContainer.new()
+	thumb_flow.add_theme_constant_override("h_separation", 6)
+	thumb_flow.add_theme_constant_override("v_separation", 6)
+	thumb_scroll.add_child(thumb_flow)
+	sidebar.set_section_content("Selection", selection_box)
 
-	var controls_label = Label.new()
-	controls_label.text = "Controls:"
-	controls_label.add_theme_font_size_override("font_size", 12)
-	controls_label.modulate = Color.WHITE
-	overlay_panel.add_child(controls_label)
-
-	var controls_info = Label.new()
-	controls_info.text = "• Arrow keys: Move camera\n• Mouse wheel: Zoom\n• Space: Follow leader\n• ESC: Quit"
-	controls_info.add_theme_font_size_override("font_size", 10)
-	controls_info.modulate = Color.LIGHT_GRAY
-	overlay_panel.add_child(controls_info)
+	# Right-pinned collapsible sidebar (modular)
+	sidebar = EvolutionSidebar.new()
+	add_child(sidebar)
 
 func setup_camera():
 	camera = Camera2D.new()
@@ -232,6 +219,14 @@ func setup_population_manager():
 	# Initialize terrain preset
 	if population_manager.has_method("set_terrain_preset"):
 		population_manager.set_terrain_preset("Grassland")
+
+	# Poll thumbnails periodically
+	var timer := Timer.new()
+	timer.wait_time = 0.5
+	timer.autostart = true
+	timer.one_shot = false
+	timer.timeout.connect(_refresh_thumbnails)
+	add_child(timer)
 
 func _input(event):
 	# Handle escape key
@@ -257,6 +252,10 @@ func _input(event):
 	elif event.is_action_pressed("ui_accept"):  # Space key
 		_follow_leader()
 
+	# Click to select car by picking nodes under mouse
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_select_car_at(get_global_mouse_position())
+
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			camera.zoom *= (1.0 + zoom_speed)
@@ -279,10 +278,10 @@ func _follow_leader():
 
 	camera.position = leader_position
 
-func _on_area_changed(name: String) -> void:
+func _on_area_changed(preset_name: String) -> void:
 	if population_manager and population_manager.has_method("set_terrain_preset"):
-		population_manager.set_terrain_preset(name)
-		status_label.text = "Area set to %s" % name
+		population_manager.set_terrain_preset(preset_name)
+		status_label.text = "Area set to %s" % preset_name
 
 func _on_start_button_pressed():
 	if is_evolution_running:
@@ -326,9 +325,9 @@ func _on_back_pressed():
 		# Ask for confirmation to stop the evolution
 		var dialog = ConfirmationDialog.new()
 		dialog.dialog_text = "Are you sure you want to go back? The evolution will be stopped."
-		dialog.popup_centered()
-		dialog.confirmed.connect(_on_back_confirmed)
 		add_child(dialog)
+		dialog.confirmed.connect(_on_back_confirmed)
+		dialog.popup_centered()
 	else:
 		# No evolution in progress, just go back
 		_go_to_menu()
@@ -365,7 +364,7 @@ func _on_population_size_changed(value: float):
 	if population_manager:
 		population_manager.population_size = int(value)
 
-func _on_generations_changed(value: float):
+func _on_generations_changed(_value: float):
 	pass # Deprecated: evolution runs indefinitely; progress bar loops visually
 
 func _on_dna_length_changed(value: float):
@@ -381,6 +380,7 @@ func _on_generation_completed(generation: int, best_score: float):
 	progress_bar.max_value = 20
 	progress_bar.value = generation % int(progress_bar.max_value)
 	status_label.text = "Racing generation %d..." % generation
+	_refresh_thumbnails()
 
 	print("UI: Generation %d completed with best score: %.1f" % [generation, best_score])
 
@@ -397,6 +397,90 @@ func _on_evolution_finished(final_best_car):
 
 	# Show completion dialog
 	show_completion_dialog(final_best_car)
+
+func _select_car_at(world_pos: Vector2):
+	if not population_manager or not population_manager.simulation_scene:
+		return
+	# Use direct pick: iterate nodes at point
+	var picked: Node = null
+	for node in population_manager.simulation_scene.get_children():
+		if node.is_in_group("car") and node is Node2D:
+			var rect := Rect2(node.global_position - Vector2(50, 50), Vector2(100, 100))
+			if rect.has_point(world_pos):
+				picked = node
+				break
+	if picked:
+		var entry := {}
+		entry["id"] = str(picked.get_meta("id")) if picked.has_meta("id") else ""
+		entry["dna_string"] = str(picked.get_meta("dna_string")) if picked.has_meta("dna_string") else ""
+		entry["parents"] = picked.get_meta("parents") if picked.has_meta("parents") else []
+		entry["car"] = null
+		entry["node"] = picked
+		_set_selected_entry(entry)
+
+func _set_selected_entry(entry: Dictionary):
+	_selected_entry = entry
+	var id: String = str(entry.get("id", ""))
+	var dna: String = str(entry.get("dna_string", ""))
+	var parents: Array = entry.get("parents", [])
+	var car: Object = entry.get("car")
+	var speed: float = 0.0
+	if car and car.has_method("get_current_speed"):
+		speed = car.get_current_speed()
+	elif entry.has("node") and entry["node"] is Node:
+		var n: Node = entry["node"]
+		var max_v: float = 0.0
+		for sub in n.get_children():
+			if sub is RigidBody2D:
+				var rb: RigidBody2D = sub
+				max_v = max(max_v, rb.linear_velocity.length())
+		speed = max_v
+	var tree: Dictionary = {}
+	if population_manager and population_manager.has_method("get_family_tree") and id != "":
+		tree = population_manager.get_family_tree(id, 2)
+	selection_details.text = "[b]ID:[/b] %s\n[b]DNA:[/b] %s\n[b]Parents:[/b] %s\n[b]Speed (px/s):[/b] %.1f\n%s" % [id, dna, ", ".join(parents), speed, _format_tree(tree)]
+
+func _format_tree(tree: Dictionary, indent: int = 0) -> String:
+	if tree.is_empty():
+		return ""
+	var pad: String = "".repeat(0)  # init
+	if indent > 0:
+		pad = "  ".repeat(indent)
+	var s := "[b]Family:[/b]\n" if indent == 0 else ""
+	s += "%s%s\n" % [pad, str(tree.get("id", "?"))]
+	var kids: Array = tree.get("children", [])
+	for child in kids:
+		s += _format_tree(child, indent + 1)
+	return s
+
+func _refresh_thumbnails():
+	if not is_instance_valid(thumb_flow) or not population_manager or not population_manager.simulation_scene:
+		return
+	for c in thumb_flow.get_children():
+		c.queue_free()
+	var infos := []
+	if population_manager and population_manager.simulation_scene:
+		for node in population_manager.simulation_scene.get_children():
+			if node.is_in_group("car"):
+				# Find any child body with meta we may show; fall back to labels
+				var info := {"id": "", "dna_string": "", "car_index": -1, "parents": []}
+				# Try to pull id/dna from metadata if present via child RigidBody2D
+				for sub in node.get_children():
+					if sub is RigidBody2D and sub.has_meta("car_index"):
+						info.car_index = int(sub.get_meta("car_index"))
+				info.id = str(node.get_meta("id")) if node.has_meta("id") else ""
+				info.dna_string = str(node.get_meta("dna_string")) if node.has_meta("dna_string") else ""
+				info.parents = node.get_meta("parents") if node.has_meta("parents") else []
+				infos.append(info)
+	for info in infos:
+		var btn := Button.new()
+		btn.custom_minimum_size = Vector2(68, 24)
+		var id: String = str(info.get("id", ""))
+		var label := id if id != "" else "#%d" % int(info.get("car_index", -1))
+		btn.text = label
+		btn.tooltip_text = "DNA: %s" % str(info.get("dna_string", ""))
+		btn.pressed.connect(func(): _set_selected_entry(info))
+		thumb_flow.add_child(btn)
 
 func _on_generation_stats(generation: int, stats: Dictionary, breeding: Dictionary):
 	if not stats_panel:

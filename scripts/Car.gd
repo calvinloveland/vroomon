@@ -262,9 +262,7 @@ func build_in(parent: Node2D, car_index: int, dna_dict: Dictionary) -> RigidBody
 			var size_b: Vector2 = b.get_meta("rect_size", Vector2(45, 25))
 			var spread: float = min(size_a.y, size_b.y) * 0.45
 			var a1_world: Vector2 = mid + perp * spread
-			var b1_world: Vector2 = mid + perp * spread
 			var a2_world: Vector2 = mid - perp * spread
-			var b2_world: Vector2 = mid - perp * spread
 			# Additional two PinJoint2D placed off-axis to create restoring moment
 			var pin1: PinJoint2D = PinJoint2D.new()
 			pin1.global_position = a1_world

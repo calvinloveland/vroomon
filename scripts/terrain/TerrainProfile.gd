@@ -2,7 +2,7 @@ class_name TerrainProfile
 extends Resource
 
 @export var name: String = "Flat"
-@export var seed: int = 0
+@export var rng_seed: int = 0
 @export var ground_length: float = 5000.0
 @export var friction: float = 1.0
 @export var ground_height: float = 400.0
@@ -14,7 +14,7 @@ extends Resource
 func clone() -> TerrainProfile:
 	var p := TerrainProfile.new()
 	p.name = name
-	p.seed = seed
+	p.rng_seed = rng_seed
 	p.ground_length = ground_length
 	p.friction = friction
 	p.ground_height = ground_height

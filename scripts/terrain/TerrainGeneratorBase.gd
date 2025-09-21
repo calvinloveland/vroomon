@@ -1,7 +1,7 @@
 class_name TerrainGeneratorBase
 extends Resource
 
-func generate(parent: Node2D, profile: TerrainProfile) -> Dictionary:
+func generate(_parent: Node2D, _profile: TerrainProfile) -> Dictionary:
 	push_error("TerrainGeneratorBase.generate not implemented")
 	return {}
 

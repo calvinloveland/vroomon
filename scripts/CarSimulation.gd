@@ -5,8 +5,8 @@ extends Node2D
 
 signal simulation_completed(results: Array)
 
-const TerrainManager = preload("res://scripts/terrain/TerrainManager.gd")
-const TerrainPresets = preload("res://scripts/terrain/TerrainPresets.gd")
+const TManager = preload("res://scripts/terrain/TerrainManager.gd")
+const TPresets = preload("res://scripts/terrain/TerrainPresets.gd")
 
 const SIMULATION_TIME = 15.0  # seconds - longer for more interesting races
 const PHYSICS_STEPS_PER_SECOND = 60
@@ -18,7 +18,7 @@ var simulation_timer: float = 0.0
 var is_simulating: bool = false
 var car_results: Array = []
 var motor_preview_always_on: bool = false
-@onready var terrain_manager = TerrainManager.new()
+@onready var terrain_manager = TManager.new()
 var terrain_name: String = "Grassland"
 
 func _ready():
@@ -27,15 +27,15 @@ func _ready():
 	# Set physics settings for better simulation
 	Engine.physics_ticks_per_second = PHYSICS_STEPS_PER_SECOND
 
-func set_terrain_preset(name: String) -> void:
-	terrain_name = name
+func set_terrain_preset(preset_name: String) -> void:
+	terrain_name = preset_name
 	_rebuild_environment()
 
 func _rebuild_environment():
 	# Clear any existing terrain and build via manager
 	terrain_manager.clear()
-	var profile := TerrainPresets.get_profile(terrain_name)
-	var generator := TerrainPresets.get_generator(terrain_name)
+	var profile := TPresets.get_profile(terrain_name)
+	var generator := TPresets.get_generator(terrain_name)
 	terrain_manager.set_profile(profile)
 	terrain_manager.set_generator(generator)
 	terrain_manager.rebuild(self)
@@ -66,14 +66,26 @@ func simulate_population(car_dna_dicts: Array) -> Array:
 		var car := Car.new()
 		var car_body := car.build_in(self, i, car_data)
 		if car_body:
-			current_cars.append({
-				"root": car_body.get_parent(),
+			var root_node := car_body.get_parent()
+			# Attach lineage/DNA metadata for UI
+			var meta: Dictionary = {}
+			if car_data.has("meta") and car_data["meta"] is Dictionary:
+				meta = car_data["meta"]
+			if meta is Dictionary:
+				if not root_node.has_meta("id"):
+					root_node.set_meta("id", meta.get("id", ""))
+				root_node.set_meta("parents", meta.get("parents", []))
+				root_node.set_meta("dna_string", meta.get("dna_string", ""))
+			root_node.set_meta("car_index", i)
+			var entry := {
+				"root": root_node,
 				"body": car_body,
 				"car": car,
 				"data": car_data,
 				"initial_position": car_body.position,
 				"car_index": i
-			})
+			}
+			current_cars.append(entry)
 
 	# Wait for simulation to complete
 	await simulation_completed
@@ -109,11 +121,12 @@ func _physics_process(delta):
 
 	# Apply motor forces to all wheels via Car API
 	for entry in current_cars:
-		if entry.has("car") and is_instance_valid(entry.root):
+		if entry.has("car") and is_instance_valid(entry["root"]):
 			var preview := not is_simulating and motor_preview_always_on
-			entry.car.update_wheels(entry.root, preview)
+			var car_obj = entry["car"]
+			car_obj.update_wheels(entry["root"], preview)
 			# Drive flexible connectors (always on during physics)
-			entry.car.update_connectors(delta)
+			car_obj.update_connectors(delta)
 
 	# End simulation after time limit only in full sim mode
 	if is_simulating and simulation_timer >= SIMULATION_TIME:
@@ -129,32 +142,35 @@ func _is_wheel_on_ground(wheel: RigidBody2D) -> bool:
 	var result: Dictionary = space_state.intersect_ray(query)
 	return result and (result.collider == ground or result.collider.get_parent() == ground)
 
+static func _cmp_score_desc(a, b) -> bool:
+	return a["score"] > b["score"]
+
 func end_simulation():
 	is_simulating = false
 
 	# Calculate results for all cars
 	car_results = []
 	for car_data in current_cars:
-		var car_body = car_data.body
-		var score = calculate_score(car_body, car_data.initial_position)
+		var car_body = car_data["body"]
+		var score = calculate_score(car_body, car_data["initial_position"])
 		car_results.append({
-			"data": car_data.data,
+			"data": car_data["data"],
 			"score": score,
 			"final_position": car_body.position,
-			"car_index": car_data.car_index
+			"car_index": car_data["car_index"]
 		})
 
 	# Sort results by score for easy identification of winner
-	car_results.sort_custom(func(a, b): return a.score > b.score)
+	car_results.sort_custom(_cmp_score_desc)
 
-	print("Race finished! Winner: Car ", car_results[0].car_index, " with score: ", car_results[0].score)
+	print("Race finished! Winner: Car ", car_results[0]["car_index"], " with score: ", car_results[0]["score"])
 
 	# Clean up all cars (free the whole root)
 	for car_data in current_cars:
-		if car_data.has("root") and is_instance_valid(car_data.root):
-			car_data.root.queue_free()
-		elif is_instance_valid(car_data.body):
-			car_data.body.queue_free()
+		if car_data.has("root") and is_instance_valid(car_data["root"]):
+			car_data["root"].queue_free()
+		elif is_instance_valid(car_data["body"]):
+			car_data["body"].queue_free()
 
 	# Remove any orphaned bodies
 	for child in get_children():
@@ -175,8 +191,8 @@ func calculate_score(car_body: RigidBody2D, initial_position: Vector2) -> float:
 	var height_maintained = initial_position.y - car_body.position.y
 
 	# Bonus for forward movement, penalty for falling too much
-	var base_score = max(0, distance_traveled)
-	var survival_bonus = max(0, -height_maintained * 0.5)  # Small bonus for staying high
+	var base_score: float = max(0.0, distance_traveled)
+	var survival_bonus: float = max(0.0, -height_maintained * 0.5)  # Small bonus for staying high
 
 	# Penalty for falling off the world
 	if car_body.position.y > 600:  # Fell too far
